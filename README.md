@@ -4,6 +4,8 @@ A responsive roster-planning demo for Boldfit stores. It adapts the weekly
 planning, shift assignment, coverage, flex staffing, temporary transfers, and
 publishing workflow from the supplied retail operations manuals.
 
+Public demo: https://sriraghav1510.github.io/boldfit-store-roster/
+
 ## Included
 
 - Weekly roster grid with shift and status codes
