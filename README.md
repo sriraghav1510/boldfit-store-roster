@@ -6,6 +6,9 @@ publishing workflow from the supplied retail operations manuals.
 
 Public demo: https://sriraghav1510.github.io/boldfit-store-roster/
 
+Android demo APK:
+https://github.com/sriraghav1510/boldfit-store-roster/releases/download/v0.1.0/Boldfit-Roster-v0.1.0.apk
+
 ## Included
 
 - Weekly roster grid with shift and status codes
@@ -28,3 +31,16 @@ Quality checks:
 npm run lint
 npm test
 ```
+
+## Android
+
+The Android project uses Capacitor and packages the responsive roster interface
+as an offline-capable native app. It adds Android safe-area styling, a branded
+launcher and splash screen, and native CSV sharing.
+
+```bash
+npm run android:sync
+```
+
+The downloadable v0.1.0 APK is debug-signed for direct testing and is not yet a
+Play Store production release.
