@@ -1,5 +1,6 @@
 "use client";
 
+import { Capacitor } from "@capacitor/core";
 import {
   useEffect,
   useMemo,
@@ -141,6 +142,21 @@ export function RosterApp() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
   }, [appState]);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    void (async () => {
+      try {
+        const { StatusBar, Style } = await import("@capacitor/status-bar");
+        await StatusBar.setOverlaysWebView({ overlay: false });
+        await StatusBar.setBackgroundColor({ color: "#171714" });
+        await StatusBar.setStyle({ style: Style.Light });
+      } catch {
+        // The browser demo does not provide native status-bar controls.
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -305,7 +321,7 @@ export function RosterApp() {
     notify("Roster published. Team notification preview is ready.", "success");
   }
 
-  function exportRoster() {
+  async function exportRoster() {
     const header = ["Employee ID", "Employee", "Role", ...dates];
     const rows = EMPLOYEES.map((employee) => [
       employee.id,
@@ -320,11 +336,39 @@ export function RosterApp() {
         row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","),
       )
       .join("\n");
+    const fileName = `boldfit-roster-${selectedWeek}.csv`;
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const [{ Directory, Encoding, Filesystem }, { Share }] =
+          await Promise.all([
+            import("@capacitor/filesystem"),
+            import("@capacitor/share"),
+          ]);
+        const savedFile = await Filesystem.writeFile({
+          path: fileName,
+          data: csv,
+          directory: Directory.Cache,
+          encoding: Encoding.UTF8,
+        });
+        await Share.share({
+          title: "Boldfit store roster",
+          text: `Roster for ${formatWeekRange(selectedWeek)}`,
+          url: savedFile.uri,
+          dialogTitle: "Share roster CSV",
+        });
+        notify("Roster CSV ready to share.", "success");
+        return;
+      } catch {
+        notify("Native sharing was unavailable. Downloading instead.", "warning");
+      }
+    }
+
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const href = window.URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = href;
-    anchor.download = `boldfit-roster-${selectedWeek}.csv`;
+    anchor.download = fileName;
     anchor.click();
     window.URL.revokeObjectURL(href);
     notify("Roster CSV downloaded.", "success");

@@ -35,11 +35,13 @@ html {
 
 body {
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
 }
 
 button,
@@ -66,6 +68,8 @@ input:focus-visible {
 
 button {
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 ::selection {
@@ -76,6 +80,7 @@ button {
 .app-shell {
   display: grid;
   min-height: 100vh;
+  min-height: 100dvh;
   grid-template-columns: 228px minmax(0, 1fr);
 }
 
@@ -2282,12 +2287,12 @@ button {
 
   .main-frame {
     grid-column: auto;
-    padding-bottom: 64px;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
   }
 
   .topbar {
     min-height: 66px;
-    padding: 8px 16px;
+    padding: calc(8px + env(safe-area-inset-top)) 16px 8px;
   }
 
   .mobile-brand {
@@ -2412,7 +2417,8 @@ button {
     left: 0;
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    min-height: 62px;
+    min-height: calc(62px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
     border-top: 1px solid #32312d;
     background: var(--ink);
     color: #a3a198;
@@ -2454,7 +2460,7 @@ button {
 
   .toast {
     right: 14px;
-    bottom: 76px;
+    bottom: calc(76px + env(safe-area-inset-bottom));
     left: 14px;
     max-width: none;
   }
