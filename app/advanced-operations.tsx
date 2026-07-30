@@ -203,7 +203,7 @@ type AdvancedState = {
 };
 
 const ADVANCED_STORAGE_KEY = "boldfit-advanced-operations-v1";
-const ACTIVE_EMPLOYEE_ID = "bf-104";
+const DEFAULT_EMPLOYEE_ID = "bf-104";
 
 function seedState(): AdvancedState {
   const today = todayIso();
@@ -435,7 +435,7 @@ function seedState(): AdvancedState {
     delivery: [
       {
         id: "delivery-1",
-        recipient: "Riya Kapoor",
+        recipient: attendanceEmployee(DEFAULT_EMPLOYEE_ID).name,
         message: "CL replacement opportunity at Bengaluru Store 01",
         primaryChannel: "Push",
         fallbackChannel: "WhatsApp",
@@ -696,9 +696,11 @@ function Card({
 export function AdvancedOperations({
   role,
   stores,
+  employeeId = DEFAULT_EMPLOYEE_ID,
 }: {
   role: DemoRole;
   stores: StoreLocation[];
+  employeeId?: string;
 }) {
   const [state, setState] = useState<AdvancedState>(seedState);
   const [toast, setToast] = useState<string | null>(null);
@@ -789,7 +791,7 @@ export function AdvancedOperations({
   function reportUnavailable() {
     const exists = state.callouts.some(
       (item) =>
-        item.employeeId === ACTIVE_EMPLOYEE_ID &&
+        item.employeeId === employeeId &&
         item.date === addDaysIso(todayIso(), 1),
     );
     if (exists) {
@@ -801,7 +803,7 @@ export function AdvancedOperations({
       callouts: [
         {
           id: `callout-${Date.now()}`,
-          employeeId: ACTIVE_EMPLOYEE_ID,
+          employeeId,
           storeCode: "BF-BLR-01",
           date: addDaysIso(todayIso(), 1),
           shift: "MID",
@@ -1022,7 +1024,7 @@ export function AdvancedOperations({
               acknowledgedIds: Array.from(
                 new Set([
                   ...announcement.acknowledgedIds,
-                  ACTIVE_EMPLOYEE_ID,
+                  employeeId,
                 ]),
               ),
             }
@@ -1111,10 +1113,11 @@ export function AdvancedOperations({
   }
 
   function downloadPayslip() {
+    const employee = attendanceEmployee(employeeId);
     const content = [
       "BOLDFIT PRIVATE LIMITED",
       "Payslip · July 2026",
-      "Employee: Riya Kapoor (BF-104)",
+      `Employee: ${employee.name} (${employee.employeeCode})`,
       "Store: Bengaluru Store 01",
       "Gross earnings: ₹36,200",
       "Deductions: ₹4,360",
@@ -1124,7 +1127,7 @@ export function AdvancedOperations({
     const href = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = href;
-    link.download = "boldfit-payslip-riya-kapoor-july-2026.txt";
+    link.download = `boldfit-payslip-${employee.employeeCode.toLowerCase()}-july-2026.txt`;
     link.click();
     URL.revokeObjectURL(href);
     notify("July payslip downloaded securely.");
@@ -1172,6 +1175,7 @@ export function AdvancedOperations({
       {role === "Employee" && (
         <EmployeeExperience
           state={state}
+          employeeId={employeeId}
           onUnavailable={reportUnavailable}
           onLearning={completeLearning}
           onAnnouncement={acknowledgeAnnouncement}
@@ -1234,6 +1238,7 @@ export function AdvancedOperations({
 
 function EmployeeExperience({
   state,
+  employeeId,
   onUnavailable,
   onLearning,
   onAnnouncement,
@@ -1242,6 +1247,7 @@ function EmployeeExperience({
   onLanguage,
 }: {
   state: AdvancedState;
+  employeeId: string;
   onUnavailable: () => void;
   onLearning: (id: string) => void;
   onAnnouncement: (id: string) => void;
@@ -1250,17 +1256,18 @@ function EmployeeExperience({
   onLanguage: (language: string) => void;
 }) {
   const personalCallout = state.callouts.find(
-    (item) => item.employeeId === ACTIVE_EMPLOYEE_ID,
+    (item) => item.employeeId === employeeId,
   );
   const personalCertifications = state.certifications.filter(
-    (item) => item.employeeId === ACTIVE_EMPLOYEE_ID,
+    (item) => item.employeeId === employeeId,
   );
+  const employee = attendanceEmployee(employeeId);
   return (
     <>
       <Heading
         eyebrow="MY BOLDFIT"
         title="Wallet, growth and communication"
-        description="Everything Riya needs beyond today's punch: shifts, money, learning, certificates, announcements and help."
+        description={`Everything ${employee.name.split(" ")[0]} needs beyond today's punch: shifts, money, learning, certificates, announcements and help.`}
         action={
           <button className="advanced-button dark" type="button" onClick={onUnavailable}>
             I cannot attend a shift
@@ -1358,7 +1365,7 @@ function EmployeeExperience({
           <div className="advanced-list announcements">
             {state.announcements.map((announcement) => {
               const acknowledged = announcement.acknowledgedIds.includes(
-                ACTIVE_EMPLOYEE_ID,
+                employeeId,
               );
               return (
                 <article key={announcement.id}>

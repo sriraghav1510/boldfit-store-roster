@@ -1166,7 +1166,13 @@ export function AttendanceSuite({
       );
     }
     if (tab === "advanced") {
-      return <AdvancedOperations role={role} stores={stores} />;
+      return (
+        <AdvancedOperations
+          role={role}
+          stores={stores}
+          employeeId={employeeId}
+        />
+      );
     }
     return (
       <SecurityView
