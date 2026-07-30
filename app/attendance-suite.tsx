@@ -59,7 +59,7 @@ type SuiteTab =
   | "security"
   | "advanced";
 
-const SUITE_STORAGE_KEY = "boldfit-attendance-suite-v2";
+const SUITE_STORAGE_KEY = "boldfit-attendance-suite-v3";
 const DEMO_OTP = "246810";
 
 const ROLE_TABS: Record<
@@ -112,6 +112,10 @@ function loadSuiteState(): AttendanceSuiteState {
       Array.isArray(parsed.registrations) &&
       parsed.payroll
     ) {
+      const hasToday = parsed.attendance.some(
+        (record) => record.date === todayIso(),
+      );
+      if (!hasToday) return initial;
       return { ...initial, ...parsed };
     }
   } catch {

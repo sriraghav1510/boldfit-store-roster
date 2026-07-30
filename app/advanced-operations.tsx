@@ -1484,7 +1484,7 @@ function ManagerDailyOperations({
       <section className="advanced-brief">
         <div className="advanced-brief-title">
           <span>THURSDAY · 09:05</span>
-          <h3>Good morning, Asha.</h3>
+          <h3>Good morning, Asha</h3>
           <p>Six actions will protect today&apos;s coverage, customer experience and store close.</p>
         </div>
         <div className="advanced-brief-actions">
@@ -1914,7 +1914,9 @@ function AreaPlanningIntelligence({
                   <i />
                 </button>
                 <div><strong>{rule.label}</strong><span>{rule.detail}</span></div>
-                <Chip value={`${rule.currentFlags} flags`} />
+                <Chip
+                  value={`${rule.currentFlags} ${rule.currentFlags === 1 ? "flag" : "flags"}`}
+                />
               </article>
             ))}
           </div>
@@ -1976,7 +1978,7 @@ function HrGovernance({
     <>
       <Heading
         eyebrow="HR ADMIN · GOVERNANCE"
-        title="Clean attendance in. Reconciled payroll out."
+        title="Clean attendance in. Reconciled payroll out"
         description="A controlled month-end chain joins employee confirmation, manager review, AOM sign-off, HR lock and Oracle-ready attendance."
         action={
           <button className="advanced-button spark" type="button" onClick={onOracle}>
@@ -2041,7 +2043,10 @@ function HrGovernance({
                 </div>
                 <div className="advanced-rule-meta">
                   <Chip value={rule.mode} />
-                  <small>{rule.currentFlags} active flags</small>
+                  <small>
+                    {rule.currentFlags} active{" "}
+                    {rule.currentFlags === 1 ? "flag" : "flags"}
+                  </small>
                 </div>
               </article>
             ))}
