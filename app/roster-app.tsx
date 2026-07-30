@@ -4,6 +4,7 @@ import { Capacitor } from "@capacitor/core";
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -48,6 +49,8 @@ import {
   type WeekRoster,
   type WhatsAppNotification,
 } from "./roster-domain";
+import { AttendanceSuite } from "./attendance-suite";
+import { type DemoRole } from "./attendance-domain";
 
 type View =
   | "overview"
@@ -56,7 +59,6 @@ type View =
   | "transfers"
   | "attendance"
   | "activity";
-type RoleMode = "Store Manager" | "Area Ops";
 type Toast = { message: string; tone: "success" | "warning" | "info" };
 type SelectedCell = { employeeId: string; date: string };
 
@@ -109,6 +111,41 @@ const NAV_ITEMS: Array<{
   { id: "activity", label: "Alerts & activity", short: "Alerts", marker: "06" },
 ];
 
+const ROLE_ORDER: DemoRole[] = [
+  "Employee",
+  "Store Manager",
+  "Area Ops",
+  "HR Admin",
+];
+
+const ROLE_NAV: Record<DemoRole, View[]> = {
+  Employee: ["attendance"],
+  "Store Manager": [
+    "overview",
+    "planner",
+    "people",
+    "transfers",
+    "attendance",
+    "activity",
+  ],
+  "Area Ops": [
+    "overview",
+    "planner",
+    "people",
+    "transfers",
+    "attendance",
+    "activity",
+  ],
+  "HR Admin": ["people", "attendance", "activity"],
+};
+
+const ROLE_INITIALS: Record<DemoRole, string> = {
+  Employee: "EM",
+  "Store Manager": "AN",
+  "Area Ops": "AO",
+  "HR Admin": "HR",
+};
+
 function formatDay(date: string) {
   return new Intl.DateTimeFormat("en-IN", { weekday: "short" }).format(
     fromIsoDate(date),
@@ -152,10 +189,11 @@ function NavIcon({ value }: { value: string }) {
 }
 
 export function RosterApp() {
-  const [appState, setAppState] = useState<RosterAppState>(loadInitialState);
+  const [appState, setAppState] = useState<RosterAppState>(createInitialState);
+  const restoredState = useRef(false);
   const [selectedWeek, setSelectedWeek] = useState(() => planningWeekIso());
   const [view, setView] = useState<View>("overview");
-  const [role, setRole] = useState<RoleMode>("Store Manager");
+  const [role, setRole] = useState<DemoRole>("Store Manager");
   const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [peopleSearch, setPeopleSearch] = useState("");
@@ -182,6 +220,15 @@ export function RosterApp() {
   );
 
   useEffect(() => {
+    const restoreTimer = window.setTimeout(() => {
+      restoredState.current = true;
+      setAppState(loadInitialState());
+    }, 0);
+    return () => window.clearTimeout(restoreTimer);
+  }, []);
+
+  useEffect(() => {
+    if (!restoredState.current) return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
   }, [appState]);
 
@@ -225,6 +272,33 @@ export function RosterApp() {
     appState.stores.find((store) => store.code === attendanceStoreCode) ??
     appState.stores[0] ??
     STORES[0];
+  const visibleNavItems = NAV_ITEMS.filter((item) =>
+    ROLE_NAV[role].includes(item.id),
+  );
+  const roleContext =
+    role === "Employee"
+      ? {
+          eyebrow: "My workplace",
+          title: "Assigned Boldfit store",
+          detail: "Personal roster · secure attendance",
+        }
+      : role === "Area Ops"
+        ? {
+            eyebrow: "Area view",
+            title: "Bengaluru Area · 3 stores",
+            detail: "Live operations and roster verification",
+          }
+        : role === "HR Admin"
+          ? {
+              eyebrow: "People operations",
+              title: "Bengaluru workforce · 3 stores",
+              detail: "Attendance, payroll and compliance",
+            }
+          : {
+              eyebrow: "Active store",
+              title: "Bengaluru Store 01",
+              detail: "BF-BLR-01 · 10:00–21:00",
+            };
 
   const filteredPeople = useMemo(() => {
     const query = peopleSearch.trim().toLowerCase();
@@ -243,6 +317,13 @@ export function RosterApp() {
   ): void {
     setToast({ message, tone });
     window.setTimeout(() => setToast(null), 3200);
+  }
+
+  function switchDemoRole() {
+    const currentIndex = ROLE_ORDER.indexOf(role);
+    const nextRole = ROLE_ORDER[(currentIndex + 1) % ROLE_ORDER.length];
+    setRole(nextRole);
+    setView(nextRole === "Store Manager" ? "overview" : "attendance");
   }
 
   function updateRoster(updater: (current: WeekRoster) => WeekRoster) {
@@ -962,7 +1043,13 @@ export function RosterApp() {
         <button
           className="brand"
           type="button"
-          onClick={() => setView("overview")}
+          onClick={() =>
+            setView(
+              role === "Employee" || role === "HR Admin"
+                ? "attendance"
+                : "overview",
+            )
+          }
           aria-label="Boldfit roster overview"
         >
           <span className="brand-word">BOLDFIT</span>
@@ -970,7 +1057,7 @@ export function RosterApp() {
         </button>
 
         <nav className="side-nav" aria-label="Primary navigation">
-          {NAV_ITEMS.map((item) => (
+          {visibleNavItems.map((item) => (
             <button
               type="button"
               className={`nav-item ${view === item.id ? "active" : ""}`}
@@ -1000,9 +1087,9 @@ export function RosterApp() {
             <span>ROSTER</span>
           </div>
           <div className="store-identity">
-            <span className="eyebrow">Active store</span>
-            <strong>Bengaluru Store 01</strong>
-            <span>BF-BLR-01 · 10:00–21:00</span>
+            <span className="eyebrow">{roleContext.eyebrow}</span>
+            <strong>{roleContext.title}</strong>
+            <span>{roleContext.detail}</span>
           </div>
           <div className="topbar-actions">
             <span className="sync-state">
@@ -1012,14 +1099,10 @@ export function RosterApp() {
             <button
               className="role-switch"
               type="button"
-              onClick={() =>
-                setRole((current) =>
-                  current === "Store Manager" ? "Area Ops" : "Store Manager",
-                )
-              }
+              onClick={switchDemoRole}
               aria-label="Switch demo role"
             >
-              <span>{role === "Store Manager" ? "AN" : "AO"}</span>
+              <span>{ROLE_INITIALS[role]}</span>
               <span>
                 <small>Viewing as</small>
                 <strong>{role}</strong>
@@ -1081,33 +1164,42 @@ export function RosterApp() {
           )}
 
           {view === "attendance" && (
-            <AttendanceView
-              stores={appState.stores}
-              employee={attendanceEmployee}
-              employeeId={attendanceEmployeeId}
-              store={attendanceStore}
-              storeCode={attendanceStoreCode}
-              pinDrafts={storePinDrafts}
-              locationCheck={locationCheck}
-              checkingLocation={checkingLocation}
-              onEmployee={(value) => {
-                setAttendanceEmployeeId(value);
-                setLocationCheck(null);
-              }}
-              onStore={(value) => {
-                setAttendanceStoreCode(value);
-                setLocationCheck(null);
-              }}
-              onPinDraft={(storeCode, value) =>
-                setStorePinDrafts((current) => ({
-                  ...current,
-                  [storeCode]: value,
-                }))
-              }
-              onSavePin={saveStorePin}
-              onCheckLocation={checkDeviceLocation}
-              onRunDemo={runDemoLocation}
-            />
+            <>
+              <AttendanceSuite
+                key={role}
+                role={role}
+                stores={appState.stores}
+              />
+              {role === "HR Admin" && (
+                <AttendanceView
+                  stores={appState.stores}
+                  employee={attendanceEmployee}
+                  employeeId={attendanceEmployeeId}
+                  store={attendanceStore}
+                  storeCode={attendanceStoreCode}
+                  pinDrafts={storePinDrafts}
+                  locationCheck={locationCheck}
+                  checkingLocation={checkingLocation}
+                  onEmployee={(value) => {
+                    setAttendanceEmployeeId(value);
+                    setLocationCheck(null);
+                  }}
+                  onStore={(value) => {
+                    setAttendanceStoreCode(value);
+                    setLocationCheck(null);
+                  }}
+                  onPinDraft={(storeCode, value) =>
+                    setStorePinDrafts((current) => ({
+                      ...current,
+                      [storeCode]: value,
+                    }))
+                  }
+                  onSavePin={saveStorePin}
+                  onCheckLocation={checkDeviceLocation}
+                  onRunDemo={runDemoLocation}
+                />
+              )}
+            </>
           )}
 
           {view === "activity" && (
@@ -1127,7 +1219,7 @@ export function RosterApp() {
         </main>
 
         <nav className="mobile-nav" aria-label="Mobile navigation">
-          {NAV_ITEMS.map((item) => (
+          {visibleNavItems.map((item) => (
             <button
               type="button"
               key={item.id}
@@ -1927,9 +2019,9 @@ function AttendanceView({
   return (
     <>
       <PageHeading
-        eyebrow="ATTENDANCE GEOFENCE"
-        title="Verify the store before every punch."
-        description="A punch can proceed to face capture only when the employee is within 10 metres of the assigned store pin."
+        eyebrow="HR ADMIN · LOCATION CONTROL"
+        title="Store geofence administration"
+        description="Set and verify the Google Maps pin used by the employee punch flow. Every store keeps a fixed 10-metre attendance boundary."
       />
 
       <section className="attendance-status-strip">
@@ -2190,7 +2282,7 @@ function ActivityView({
   activity: RosterAppState["activity"];
   notifications: WhatsAppNotification[];
   roster: WeekRoster;
-  role: RoleMode;
+  role: DemoRole;
   onReset: () => void;
   onCopyNotification: (id: string) => void;
   onShareNotification: (id: string) => void;
@@ -2383,7 +2475,7 @@ function ActivityView({
             </div>
           </div>
 
-          {role === "Area Ops" ? (
+          {role === "Area Ops" || role === "HR Admin" ? (
             <div className="review-controls">
               <label>
                 Review comment
@@ -2417,7 +2509,7 @@ function ActivityView({
           ) : (
             <div className="review-role-note">
               <span>SM VIEW</span>
-              Switch the demo role to <strong>Area Ops</strong> to approve or
+              Switch to <strong>Area Ops or HR Admin</strong> to approve or
               return this roster.
             </div>
           )}

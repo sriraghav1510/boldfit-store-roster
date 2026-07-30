@@ -15,9 +15,15 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Boldfit Roster | Store Operations",
   description:
-    "Plan store shifts, monitor coverage, and coordinate temporary staff movement across Boldfit stores.",
+    "Plan shifts, record secure attendance, coordinate stores, and prepare payroll across Boldfit workforce operations.",
   applicationName: "Boldfit Roster",
-  keywords: ["Boldfit", "store roster", "workforce planning", "retail operations"],
+  keywords: [
+    "Boldfit",
+    "store roster",
+    "attendance",
+    "workforce planning",
+    "retail operations",
+  ],
 };
 
 export default function RootLayout({

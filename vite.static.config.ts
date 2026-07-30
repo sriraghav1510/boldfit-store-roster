@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: "../docs",
-    emptyOutDir: true,
+    // Preserve any separately named review artifacts already placed in docs.
+    emptyOutDir: false,
   },
 });
