@@ -69,6 +69,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk Boldfit-Roster-v0.1.0.apk
-          gh release delete-asset v0.1.0 app-debug.apk --yes
-          gh release upload v0.1.0 Boldfit-Roster-v0.1.0.apk --clobber
+          cp android/app/build/outputs/apk/debug/app-debug.apk Boldfit-Roster-v0.2.0.apk
+          gh release view v0.2.0 >/dev/null 2>&1 || gh release create v0.2.0 --title "Boldfit Roster v0.2.0" --notes "Advanced workforce operations: automated absence cover, labour intelligence, store execution, employee growth and payroll governance."
+          gh release upload v0.2.0 Boldfit-Roster-v0.2.0.apk --clobber

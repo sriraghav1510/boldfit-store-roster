@@ -6,7 +6,7 @@ employee self-service, multi-store oversight, payroll preparation and store
 operations.
 
 - Public demo: https://sriraghav1510.github.io/boldfit-store-roster/
-- Android APK: https://github.com/sriraghav1510/boldfit-store-roster/releases/download/v0.1.0/Boldfit-Roster-v0.1.0.apk
+- Android APK: https://github.com/sriraghav1510/boldfit-store-roster/releases/download/v0.2.0/Boldfit-Roster-v0.2.0.apk
 
 The demo uses sample data and persists changes on the current device. Camera,
 location, download and native share controls are interactive. Face matching,
@@ -18,16 +18,20 @@ faithfully in the workflow but require production services before real use.
 Use the role switcher in the top-right corner. It cycles through:
 
 - **Employee:** one-time registration, face enrolment, geofence and face punch,
-  datewise history, regularisation, leave, swaps, open shifts and preferences.
+  datewise history, regularisation, leave, swaps, open shifts, preferences,
+  payslips, balances, micro-learning, certifications and announcements.
 - **Store Manager:** roster planning, team registration readiness, an action
   inbox, attendance corrections, leave/swap decisions, open shifts and store
-  opening/closing checklists. This role intentionally has **no live attendance
-  dashboard**.
+  opening/closing checklists, a daily action brief, absence replacement, shift
+  tasks, handovers, incidents and maintenance. This role intentionally has
+  **no live attendance dashboard**.
 - **Area Ops:** authorised three-store live attendance, exception approval,
-  staffing and productivity analytics, demand coverage and operational checks.
+  30-minute demand planning, labour budgets, scenario simulation, fairness,
+  staffing and productivity analytics, field audits and operational checks.
 - **HR Admin:** authorised live attendance, payroll approval/locking, CSV
-  export, comp-off, skills, trusted devices, audit history and store geofence
-  administration.
+  and Oracle export, month-end reconciliation, comp-off, expiring skills,
+  compliance policy controls, communication delivery, trusted devices, audit
+  history and store geofence administration.
 
 ## Roster and communication
 
@@ -70,6 +74,29 @@ Use the role switcher in the top-right corner. It cycles through:
 - Payroll chain: Draft → SM approved → AOM approved → Locked
 - Attendance payroll CSV and compensatory-off balance flow
 - Trusted-device reset, biometric/privacy controls and immutable audit history
+
+## Advanced operations
+
+- Employee call-out workflow with skill, hours, distance and overtime-aware
+  replacement recommendations
+- One-tap eligible-shift broadcast, acceptance, roster update and confirmation
+- Store labour-hour budgets, projected cost, overtime and sales-per-labour-hour
+- Configurable rest, consecutive-days, weekly-hours, FULL-shift, certification
+  and budget guardrails
+- Delivery, read, acknowledgement, fallback and escalation tracking across
+  push, WhatsApp and SMS
+- Store Manager morning brief containing only actions—not a live dashboard
+- Sales, footfall, promotion, weather, local-event and task-load demand signals
+- 30-minute staffing recommendations and what-if roster simulation
+- Task assignment with proof, SLA and manager verification
+- Shift handovers, opening/closing assurance, incidents and maintenance tickets
+- Roster fairness, fatigue warnings and transfer commute protection
+- Employee wallet, payslip download, leave/comp-off balances and incentives
+- Micro-learning, expiring certifications and skill-award workflow
+- Targeted announcements, policy acknowledgement and language preferences
+- AOM geo/photo store-visit audits with corrective actions
+- Employee → SM → AOM → HR → Oracle month-end reconciliation
+- Private employee and team recognition without public attendance ranking
 
 ## Visual system
 

@@ -40,6 +40,7 @@ import {
   type GeofenceResult,
   type StoreLocation,
 } from "./roster-domain";
+import { AdvancedOperations } from "./advanced-operations";
 
 type SuiteTab =
   | "my-day"
@@ -55,7 +56,8 @@ type SuiteTab =
   | "operations"
   | "payroll"
   | "people-admin"
-  | "security";
+  | "security"
+  | "advanced";
 
 const SUITE_STORAGE_KEY = "boldfit-attendance-suite-v2";
 const DEMO_OTP = "246810";
@@ -69,21 +71,25 @@ const ROLE_TABS: Record<
     { id: "self-service", label: "Requests", short: "02" },
     { id: "history", label: "History", short: "03" },
     { id: "profile", label: "My profile", short: "04" },
+    { id: "advanced", label: "Wallet & growth", short: "05" },
   ],
   "Store Manager": [
     { id: "actions", label: "Action inbox", short: "IN" },
+    { id: "advanced", label: "Daily ops", short: "NEW" },
     { id: "team", label: "Team setup", short: "SET" },
     { id: "store-ops", label: "Store operations", short: "OPS" },
     { id: "self-service", label: "Team requests", short: "REQ" },
   ],
   "Area Ops": [
     { id: "live", label: "Live dashboard", short: "LV" },
+    { id: "advanced", label: "AI planning", short: "NEW" },
     { id: "exceptions", label: "Exceptions", short: "EX" },
     { id: "analytics", label: "Analytics", short: "AN" },
     { id: "operations", label: "Operations", short: "OP" },
   ],
   "HR Admin": [
     { id: "live", label: "Live dashboard", short: "LV" },
+    { id: "advanced", label: "Governance", short: "NEW" },
     { id: "payroll", label: "Payroll", short: "PAY" },
     { id: "people-admin", label: "People & skills", short: "PEO" },
     { id: "security", label: "Security & devices", short: "SEC" },
@@ -1154,6 +1160,9 @@ export function AttendanceSuite({
       return (
         <PeopleAdminView state={state} onSkill={toggleSkill} />
       );
+    }
+    if (tab === "advanced") {
+      return <AdvancedOperations role={role} stores={stores} />;
     }
     return (
       <SecurityView

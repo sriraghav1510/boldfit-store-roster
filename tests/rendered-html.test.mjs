@@ -42,16 +42,23 @@ test("server-renders the Boldfit roster application", async () => {
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
 
-test("removes the disposable starter preview", async () => {
-  const [page, layout, packageJson] = await Promise.all([
+test("removes the disposable starter preview and includes advanced operations", async () => {
+  const [page, layout, packageJson, attendanceSuite, advancedOperations] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/attendance-suite.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/advanced-operations.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /RosterApp/);
   assert.match(layout, /Boldfit Roster/);
   assert.doesNotMatch(page, /SkeletonPreview|codex-preview/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
+  assert.match(attendanceSuite, /Daily ops/);
+  assert.match(attendanceSuite, /AI planning/);
+  assert.match(attendanceSuite, /Governance/);
+  assert.match(advancedOperations, /AUTO REPLACEMENT/);
+  assert.match(advancedOperations, /Month-end attendance reconciliation/);
   await assert.rejects(access(new URL("app/_sites-preview", templateRoot)));
 });
