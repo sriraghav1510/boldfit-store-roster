@@ -28,28 +28,39 @@ import {
   coverageForDate,
   createInitialState,
   createWeekRoster,
+  evaluateStoreGeofence,
   employeeWeekHours,
   employeeWorkDays,
   formatWeekRange,
   fromIsoDate,
+  parseGoogleMapsPin,
   planningWeekIso,
   rosterCompletion,
   weekDates,
+  type DeviceLocation,
   type Employee,
+  type GeofenceResult,
   type RosterAppState,
   type RosterValue,
   type ShiftCode,
+  type StoreLocation,
   type TransferRequest,
   type WeekRoster,
   type WhatsAppNotification,
 } from "./roster-domain";
 
-type View = "overview" | "planner" | "people" | "transfers" | "activity";
+type View =
+  | "overview"
+  | "planner"
+  | "people"
+  | "transfers"
+  | "attendance"
+  | "activity";
 type RoleMode = "Store Manager" | "Area Ops";
 type Toast = { message: string; tone: "success" | "warning" | "info" };
 type SelectedCell = { employeeId: string; date: string };
 
-const STORAGE_KEY = "boldfit-roster-demo-v2";
+const STORAGE_KEY = "boldfit-roster-demo-v3";
 
 function loadInitialState(): RosterAppState {
   const initialState = createInitialState();
@@ -68,6 +79,10 @@ function loadInitialState(): RosterAppState {
     if (parsed.schedules && parsed.transfers && parsed.activity) {
       return {
         ...parsed,
+        stores:
+          Array.isArray(parsed.stores) && parsed.stores.length === 3
+            ? parsed.stores
+            : initialState.stores,
         notifications: Array.isArray(parsed.notifications)
           ? parsed.notifications
           : initialState.notifications,
@@ -90,7 +105,8 @@ const NAV_ITEMS: Array<{
   { id: "planner", label: "Roster planner", short: "Plan", marker: "02" },
   { id: "people", label: "People", short: "People", marker: "03" },
   { id: "transfers", label: "Flex & transfers", short: "Flex", marker: "04" },
-  { id: "activity", label: "Alerts & activity", short: "Alerts", marker: "05" },
+  { id: "attendance", label: "Attendance", short: "Punch", marker: "05" },
+  { id: "activity", label: "Alerts & activity", short: "Alerts", marker: "06" },
 ];
 
 function formatDay(date: string) {
@@ -151,6 +167,19 @@ export function RosterApp() {
     addDaysIso(planningWeekIso(), 5),
   );
   const [transferShift, setTransferShift] = useState<ShiftCode>("CL");
+  const [attendanceEmployeeId, setAttendanceEmployeeId] = useState("bf-101");
+  const [attendanceStoreCode, setAttendanceStoreCode] =
+    useState("BF-BLR-01");
+  const [locationCheck, setLocationCheck] =
+    useState<GeofenceResult | null>(null);
+  const [checkingLocation, setCheckingLocation] = useState(false);
+  const [storePinDrafts, setStorePinDrafts] = useState<
+    Record<string, string>
+  >(() =>
+    Object.fromEntries(
+      STORES.map((store) => [store.code, store.googleMapsPin]),
+    ),
+  );
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
@@ -191,6 +220,11 @@ export function RosterApp() {
   const selectedEmployee = selectedCell
     ? employeeById(selectedCell.employeeId)
     : undefined;
+  const attendanceEmployee = employeeById(attendanceEmployeeId) ?? EMPLOYEES[0];
+  const attendanceStore =
+    appState.stores.find((store) => store.code === attendanceStoreCode) ??
+    appState.stores[0] ??
+    STORES[0];
 
   const filteredPeople = useMemo(() => {
     const query = peopleSearch.trim().toLowerCase();
@@ -510,10 +544,113 @@ export function RosterApp() {
     notify("Roster CSV downloaded.", "success");
   }
 
+  function saveStorePin(storeCode: string) {
+    const draft = storePinDrafts[storeCode] ?? "";
+    const parsed = parseGoogleMapsPin(draft);
+    if (!parsed) {
+      notify(
+        "Enter latitude, longitude or a full Google Maps URL containing coordinates.",
+        "warning",
+      );
+      return;
+    }
+
+    const store = appState.stores.find((item) => item.code === storeCode);
+    if (!store) return;
+
+    setAppState((current) => ({
+      ...current,
+      stores: current.stores.map((item) =>
+        item.code === storeCode
+          ? {
+              ...item,
+              ...parsed,
+              googleMapsPin: draft.trim(),
+              geofenceRadiusMeters: 10,
+              pinStatus: "Configured",
+            }
+          : item,
+      ),
+      activity: [
+        {
+          id: `activity-${Date.now()}`,
+          title: "Store geofence updated",
+          detail: `${store.name} pin saved with a fixed 10m attendance boundary.`,
+          kind: "success",
+          time: "Just now",
+        },
+        ...current.activity,
+      ],
+    }));
+    if (storeCode === attendanceStoreCode) {
+      setLocationCheck(null);
+    }
+    notify(`${store.name} geofence saved at a 10m radius.`, "success");
+  }
+
+  function applyLocationCheck(deviceLocation: DeviceLocation) {
+    if (!attendanceStore) return;
+    setLocationCheck(
+      evaluateStoreGeofence(attendanceStore, deviceLocation),
+    );
+  }
+
+  function runDemoLocation(kind: "inside" | "outside" | "inaccurate") {
+    if (!attendanceStore) return;
+    const offsetMeters = kind === "inside" ? 5 : 18;
+    applyLocationCheck({
+      latitude:
+        attendanceStore.latitude + offsetMeters / 111_111,
+      longitude: attendanceStore.longitude,
+      accuracyMeters: kind === "inaccurate" ? 40 : 5,
+    });
+  }
+
+  function checkDeviceLocation() {
+    if (!attendanceStore) return;
+    if (!navigator.geolocation) {
+      notify("Location services are not available on this device.", "warning");
+      return;
+    }
+
+    setCheckingLocation(true);
+    setLocationCheck(null);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        applyLocationCheck({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracyMeters: position.coords.accuracy,
+        });
+        setCheckingLocation(false);
+      },
+      (error) => {
+        setCheckingLocation(false);
+        notify(
+          error.code === error.PERMISSION_DENIED
+            ? "Allow precise location access to verify the store boundary."
+            : "A precise location could not be obtained. Move near the entrance and retry.",
+          "warning",
+        );
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 15_000,
+      },
+    );
+  }
+
   function resetDemo() {
     const initial = createInitialState();
     window.localStorage.removeItem(STORAGE_KEY);
     setAppState(initial);
+    setStorePinDrafts(
+      Object.fromEntries(
+        initial.stores.map((store) => [store.code, store.googleMapsPin]),
+      ),
+    );
+    setLocationCheck(null);
     setSelectedWeek(planningWeekIso());
     setView("overview");
     notify("Demo data reset.", "info");
@@ -940,6 +1077,36 @@ export function RosterApp() {
               transfers={appState.transfers}
               onAdd={() => setShowTransferForm(true)}
               onCancel={cancelTransfer}
+            />
+          )}
+
+          {view === "attendance" && (
+            <AttendanceView
+              stores={appState.stores}
+              employee={attendanceEmployee}
+              employeeId={attendanceEmployeeId}
+              store={attendanceStore}
+              storeCode={attendanceStoreCode}
+              pinDrafts={storePinDrafts}
+              locationCheck={locationCheck}
+              checkingLocation={checkingLocation}
+              onEmployee={(value) => {
+                setAttendanceEmployeeId(value);
+                setLocationCheck(null);
+              }}
+              onStore={(value) => {
+                setAttendanceStoreCode(value);
+                setLocationCheck(null);
+              }}
+              onPinDraft={(storeCode, value) =>
+                setStorePinDrafts((current) => ({
+                  ...current,
+                  [storeCode]: value,
+                }))
+              }
+              onSavePin={saveStorePin}
+              onCheckLocation={checkDeviceLocation}
+              onRunDemo={runDemoLocation}
             />
           )}
 
@@ -1722,6 +1889,288 @@ function TransfersView({
           </div>
         </section>
       </div>
+    </>
+  );
+}
+
+function AttendanceView({
+  stores,
+  employee,
+  employeeId,
+  store,
+  storeCode,
+  pinDrafts,
+  locationCheck,
+  checkingLocation,
+  onEmployee,
+  onStore,
+  onPinDraft,
+  onSavePin,
+  onCheckLocation,
+  onRunDemo,
+}: {
+  stores: StoreLocation[];
+  employee: Employee;
+  employeeId: string;
+  store: StoreLocation;
+  storeCode: string;
+  pinDrafts: Record<string, string>;
+  locationCheck: GeofenceResult | null;
+  checkingLocation: boolean;
+  onEmployee: (value: string) => void;
+  onStore: (value: string) => void;
+  onPinDraft: (storeCode: string, value: string) => void;
+  onSavePin: (storeCode: string) => void;
+  onCheckLocation: () => void;
+  onRunDemo: (kind: "inside" | "outside" | "inaccurate") => void;
+}) {
+  return (
+    <>
+      <PageHeading
+        eyebrow="ATTENDANCE GEOFENCE"
+        title="Verify the store before every punch."
+        description="A punch can proceed to face capture only when the employee is within 10 metres of the assigned store pin."
+      />
+
+      <section className="attendance-status-strip">
+        <div>
+          <span className="eyebrow">BOUNDARY</span>
+          <strong>10m</strong>
+          <p>Fixed radius around each admin-approved Google Maps pin</p>
+        </div>
+        <div>
+          <span className="eyebrow">LOCATION CAPTURE</span>
+          <strong>Punch only</strong>
+          <p>No continuous employee location tracking</p>
+        </div>
+        <div>
+          <span className="eyebrow">DEVICE TIME</span>
+          <strong>Ignored</strong>
+          <p>Production punches will use the backend server timestamp</p>
+        </div>
+      </section>
+
+      <div className="attendance-layout">
+        <section className="panel punch-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">EMPLOYEE DEMO</span>
+              <h2>Test punch location</h2>
+            </div>
+            <span className="status-chip active">Geofence first</span>
+          </div>
+
+          <div className="punch-person">
+            <span className="avatar large">{employee.initials}</span>
+            <div>
+              <strong>{employee.name}</strong>
+              <span>{employee.role} · {employee.id.toUpperCase()}</span>
+            </div>
+          </div>
+
+          <div className="attendance-fields">
+            <label>
+              Employee
+              <select
+                value={employeeId}
+                onChange={(event) => onEmployee(event.target.value)}
+              >
+                {EMPLOYEES.map((person) => (
+                  <option value={person.id} key={person.id}>
+                    {person.name} · {person.id.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Expected store
+              <select
+                value={storeCode}
+                onChange={(event) => onStore(event.target.value)}
+              >
+                {stores.map((item) => (
+                  <option value={item.code} key={item.code}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="store-boundary-card">
+            <div className="boundary-pin" aria-hidden="true">
+              <span />
+            </div>
+            <div>
+              <span className="eyebrow">EXPECTED LOCATION</span>
+              <strong>{store.name}</strong>
+              <p>
+                {store.latitude.toFixed(6)}, {store.longitude.toFixed(6)} ·{" "}
+                {store.geofenceRadiusMeters}m radius
+              </p>
+            </div>
+            <a
+              href={`https://www.google.com/maps?q=${store.latitude},${store.longitude}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open pin
+            </a>
+          </div>
+
+          <button
+            className="button primary location-button"
+            type="button"
+            onClick={onCheckLocation}
+            disabled={checkingLocation}
+          >
+            {checkingLocation ? "Finding precise location…" : "Use current phone location"}
+          </button>
+
+          <div className="demo-location-actions" aria-label="Geofence test cases">
+            <button type="button" onClick={() => onRunDemo("inside")}>
+              Test inside 5m
+            </button>
+            <button type="button" onClick={() => onRunDemo("outside")}>
+              Test outside 18m
+            </button>
+            <button type="button" onClick={() => onRunDemo("inaccurate")}>
+              Test weak GPS
+            </button>
+          </div>
+
+          {locationCheck ? (
+            <div
+              className={`geofence-result ${locationCheck.status.toLowerCase()}`}
+              role="status"
+            >
+              <span className="result-icon" aria-hidden="true">
+                {locationCheck.allowed
+                  ? "✓"
+                  : locationCheck.status === "Retry"
+                    ? "↻"
+                    : "!"}
+              </span>
+              <div>
+                <strong>
+                  {locationCheck.status === "Inside"
+                    ? "Inside store boundary"
+                    : locationCheck.status === "Retry"
+                      ? "Precise GPS required"
+                      : "Outside store boundary"}
+                </strong>
+                <p>{locationCheck.message}</p>
+                <small>
+                  Distance {locationCheck.distanceMeters}m · Accuracy ±
+                  {locationCheck.accuracyMeters}m
+                </small>
+              </div>
+            </div>
+          ) : (
+            <div className="geofence-empty">
+              <span aria-hidden="true">◎</span>
+              <p>
+                Location has not been checked. Face capture remains locked.
+              </p>
+            </div>
+          )}
+
+          <button
+            className="button face-gate"
+            type="button"
+            disabled={!locationCheck?.allowed}
+          >
+            {locationCheck?.allowed
+              ? "Continue to face capture"
+              : "Face capture locked"}
+          </button>
+        </section>
+
+        <section className="panel store-pin-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">BACKEND ADMIN DEMO</span>
+              <h2>Store location pins</h2>
+            </div>
+            <span className="count-badge">{stores.length}</span>
+          </div>
+          <p className="panel-intro">
+            Paste coordinates or a full Google Maps URL containing the
+            latitude and longitude. Saving always applies a fixed 10m radius.
+          </p>
+
+          <div className="store-pin-list">
+            {stores.map((item) => (
+              <article className="store-pin-item" key={item.code}>
+                <div className="store-pin-heading">
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{item.code} · {item.hours}</span>
+                  </div>
+                  <span
+                    className={`status-chip ${item.pinStatus === "Configured" ? "active" : "draft"}`}
+                  >
+                    {item.pinStatus === "Configured"
+                      ? "Admin configured"
+                      : "Demo pin"}
+                  </span>
+                </div>
+                <label>
+                  Google location pin
+                  <input
+                    value={pinDrafts[item.code] ?? ""}
+                    onChange={(event) =>
+                      onPinDraft(item.code, event.target.value)
+                    }
+                    placeholder="12.971599, 77.594566"
+                    aria-label={`${item.name} Google location pin`}
+                  />
+                </label>
+                <div className="pin-meta">
+                  <span>
+                    {item.latitude.toFixed(6)}, {item.longitude.toFixed(6)}
+                  </span>
+                  <strong>{item.geofenceRadiusMeters}m radius</strong>
+                  <button type="button" onClick={() => onSavePin(item.code)}>
+                    Save pin
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <section className="panel geofence-rules-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">VALIDATION ORDER</span>
+            <h2>What happens when an employee taps Punch In or Punch Out</h2>
+          </div>
+        </div>
+        <div className="geofence-steps">
+          <article>
+            <span>01</span>
+            <strong>Read assignment</strong>
+            <p>Use the roster or effective transfer store for that date.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <strong>Read precise GPS</strong>
+            <p>Reject stale or weak readings above ±25m accuracy.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <strong>Measure boundary</strong>
+            <p>Calculate distance from the admin-approved store pin.</p>
+          </article>
+          <article>
+            <span>04</span>
+            <strong>Unlock face capture</strong>
+            <p>Continue only when the measured distance is 10m or less.</p>
+          </article>
+        </div>
+      </section>
     </>
   );
 }

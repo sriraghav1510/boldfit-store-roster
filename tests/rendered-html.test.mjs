@@ -37,6 +37,7 @@ test("server-renders the Boldfit roster application", async () => {
   assert.match(html, /Your store, properly covered\./);
   assert.match(html, /Roster planner/);
   assert.match(html, /Flex &amp; transfers/);
+  assert.match(html, /Attendance/);
   assert.match(html, /Interactive demo/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });

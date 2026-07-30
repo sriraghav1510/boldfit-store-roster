@@ -21,6 +21,9 @@ https://github.com/sriraghav1510/boldfit-store-roster/releases/download/v0.1.0/B
 - Employee roster acknowledgements and issue reporting
 - Published-shift change communication with an audit trail
 - AOM roster approval and return-for-correction workflow
+- Three-store backend location configuration using Google Maps coordinates
+- Fixed 10-metre punch geofence with weak-GPS retry handling
+- Employee punch-location demo for inside, outside, and inaccurate readings
 
 ## Run locally
 
@@ -40,7 +43,8 @@ npm test
 
 The Android project uses Capacitor and packages the responsive roster interface
 as an offline-capable native app. It adds Android safe-area styling, a branded
-launcher and splash screen, and native CSV sharing.
+launcher and splash screen, native CSV sharing, and precise-location permission
+for attendance geofence verification.
 
 ```bash
 npm run android:sync

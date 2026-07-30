@@ -22,6 +22,31 @@ export type Employee = {
   status: "Active" | "Flex pool";
 };
 
+export type StoreLocation = {
+  code: string;
+  name: string;
+  hours: string;
+  latitude: number;
+  longitude: number;
+  geofenceRadiusMeters: 10;
+  googleMapsPin: string;
+  pinStatus: "Demo" | "Configured";
+};
+
+export type DeviceLocation = {
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+};
+
+export type GeofenceResult = {
+  status: "Inside" | "Outside" | "Retry";
+  allowed: boolean;
+  distanceMeters: number;
+  accuracyMeters: number;
+  message: string;
+};
+
 export type ShiftDefinition = {
   code: ShiftCode;
   label: string;
@@ -92,6 +117,7 @@ export type RosterAppState = {
   transfers: TransferRequest[];
   activity: ActivityEvent[];
   notifications: WhatsAppNotification[];
+  stores: StoreLocation[];
 };
 
 export const SHIFT_DEFINITIONS: Record<ShiftCode, ShiftDefinition> = {
@@ -248,12 +274,145 @@ export const FLEX_POOL: Employee[] = [
   },
 ];
 
-export const STORES = [
-  { code: "BF-BLR-01", name: "Bengaluru Store 01" },
-  { code: "BF-BLR-02", name: "Bengaluru Store 02" },
-  { code: "BF-BLR-03", name: "Bengaluru Store 03" },
-  { code: "BF-BLR-04", name: "Bengaluru Store 04" },
+export const STORES: StoreLocation[] = [
+  {
+    code: "BF-BLR-01",
+    name: "Bengaluru Store 01",
+    hours: "10:00–21:00",
+    latitude: 12.971599,
+    longitude: 77.594566,
+    geofenceRadiusMeters: 10,
+    googleMapsPin: "12.971599, 77.594566",
+    pinStatus: "Demo",
+  },
+  {
+    code: "BF-BLR-02",
+    name: "Bengaluru Store 02",
+    hours: "10:00–21:00",
+    latitude: 12.935192,
+    longitude: 77.624481,
+    geofenceRadiusMeters: 10,
+    googleMapsPin: "12.935192, 77.624481",
+    pinStatus: "Demo",
+  },
+  {
+    code: "BF-BLR-03",
+    name: "Bengaluru Store 03",
+    hours: "10:00–21:00",
+    latitude: 13.0358,
+    longitude: 77.597,
+    geofenceRadiusMeters: 10,
+    googleMapsPin: "13.035800, 77.597000",
+    pinStatus: "Demo",
+  },
 ];
+
+const EARTH_RADIUS_METERS = 6_371_000;
+export const MAX_GEOFENCE_ACCURACY_METERS = 25;
+
+function degreesToRadians(value: number): number {
+  return (value * Math.PI) / 180;
+}
+
+export function distanceBetweenMeters(
+  first: Pick<DeviceLocation, "latitude" | "longitude">,
+  second: Pick<DeviceLocation, "latitude" | "longitude">,
+): number {
+  const latitudeDelta = degreesToRadians(
+    second.latitude - first.latitude,
+  );
+  const longitudeDelta = degreesToRadians(
+    second.longitude - first.longitude,
+  );
+  const firstLatitude = degreesToRadians(first.latitude);
+  const secondLatitude = degreesToRadians(second.latitude);
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(firstLatitude) *
+      Math.cos(secondLatitude) *
+      Math.sin(longitudeDelta / 2) ** 2;
+  const arc = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  return EARTH_RADIUS_METERS * arc;
+}
+
+export function evaluateStoreGeofence(
+  store: StoreLocation,
+  deviceLocation: DeviceLocation,
+): GeofenceResult {
+  const distanceMeters = distanceBetweenMeters(store, deviceLocation);
+  const roundedDistance = Math.round(distanceMeters * 10) / 10;
+  const roundedAccuracy = Math.round(deviceLocation.accuracyMeters);
+
+  if (
+    !Number.isFinite(deviceLocation.accuracyMeters) ||
+    deviceLocation.accuracyMeters > MAX_GEOFENCE_ACCURACY_METERS
+  ) {
+    return {
+      status: "Retry",
+      allowed: false,
+      distanceMeters: roundedDistance,
+      accuracyMeters: roundedAccuracy,
+      message: `GPS accuracy is ±${roundedAccuracy}m. Move near the store entrance and retry.`,
+    };
+  }
+
+  if (distanceMeters <= store.geofenceRadiusMeters) {
+    return {
+      status: "Inside",
+      allowed: true,
+      distanceMeters: roundedDistance,
+      accuracyMeters: roundedAccuracy,
+      message: `Location verified inside the ${store.geofenceRadiusMeters}m store boundary.`,
+    };
+  }
+
+  return {
+    status: "Outside",
+    allowed: false,
+    distanceMeters: roundedDistance,
+    accuracyMeters: roundedAccuracy,
+    message: `You are ${roundedDistance}m from the store pin. Move within ${store.geofenceRadiusMeters}m to continue.`,
+  };
+}
+
+export function parseGoogleMapsPin(
+  value: string,
+): Pick<DeviceLocation, "latitude" | "longitude"> | null {
+  const input = value.trim();
+  if (!input) return null;
+
+  let decoded = input;
+  try {
+    decoded = decodeURIComponent(input);
+  } catch {
+    // An ordinary coordinate pair is already usable without URL decoding.
+  }
+
+  const candidates = [
+    decoded.match(/@(-?\d{1,2}(?:\.\d+)?),\s*(-?\d{1,3}(?:\.\d+)?)/),
+    decoded.match(/[?&](?:q|query|destination)=(-?\d{1,2}(?:\.\d+)?),\s*(-?\d{1,3}(?:\.\d+)?)/i),
+    decoded.match(/^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/),
+  ];
+  const match = candidates.find(
+    (candidate): candidate is RegExpMatchArray => candidate !== null,
+  );
+  if (!match) return null;
+
+  const latitude = Number(match[1]);
+  const longitude = Number(match[2]);
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return null;
+  }
+
+  return { latitude, longitude };
+}
 
 const SHIFT_PATTERNS: ShiftCode[][] = [
   ["OP", "OP", "MID", "MID", "CL", "WO", "FULL"],
@@ -964,6 +1123,7 @@ export function createInitialState(): RosterAppState {
       [current]: currentRoster,
       [planning]: createWeekRoster(planning, true),
     },
+    stores: structuredClone(STORES),
     transfers,
     activity: [
       {

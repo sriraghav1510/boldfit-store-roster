@@ -2717,6 +2717,402 @@ button {
   font-weight: 800;
 }
 
+.attendance-status-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.attendance-status-strip > div {
+  min-height: 104px;
+  padding: 17px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.attendance-status-strip strong {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 20px;
+  letter-spacing: -0.7px;
+}
+
+.attendance-status-strip p,
+.panel-intro {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.attendance-layout {
+  display: grid;
+  grid-template-columns: minmax(340px, 0.85fr) minmax(440px, 1.15fr);
+  gap: 14px;
+}
+
+.punch-panel,
+.store-pin-panel {
+  overflow: hidden;
+}
+
+.punch-panel {
+  padding-bottom: 16px;
+}
+
+.punch-person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 18px 12px;
+  padding: 14px;
+  border-radius: 11px;
+  background: var(--ink);
+  color: #fff;
+}
+
+.punch-person > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.punch-person strong {
+  font-size: 12px;
+}
+
+.punch-person div span {
+  color: #aaa89f;
+  font-size: 8px;
+}
+
+.attendance-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 0 18px 14px;
+}
+
+.attendance-fields label,
+.store-pin-item label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+}
+
+.attendance-fields select,
+.store-pin-item input {
+  width: 100%;
+  min-height: 41px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 9px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.store-boundary-card {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  margin: 0 18px 14px;
+  padding: 13px;
+  border: 1px solid #cbd7ba;
+  border-radius: 10px;
+  background: #f7faee;
+}
+
+.boundary-pin {
+  position: relative;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px dashed var(--green);
+  border-radius: 50%;
+  background: rgba(36, 122, 97, 0.06);
+}
+
+.boundary-pin::before {
+  width: 15px;
+  height: 15px;
+  border-radius: 50% 50% 50% 0;
+  background: var(--accent);
+  content: "";
+  rotate: -45deg;
+}
+
+.boundary-pin span {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.store-boundary-card strong {
+  display: block;
+  margin: 4px 0;
+  font-size: 10px;
+}
+
+.store-boundary-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.store-boundary-card a {
+  color: var(--green);
+  font-size: 8px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.location-button {
+  width: calc(100% - 36px);
+  min-height: 46px;
+  margin: 0 18px;
+}
+
+.demo-location-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 9px 18px 0;
+}
+
+.demo-location-actions button {
+  min-height: 34px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+  font-size: 7px;
+  font-weight: 700;
+}
+
+.demo-location-actions button:hover {
+  border-color: var(--ink);
+}
+
+.geofence-result,
+.geofence-empty {
+  display: flex;
+  min-height: 83px;
+  align-items: center;
+  gap: 11px;
+  margin: 12px 18px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.geofence-result.inside {
+  border-color: #a7cbbf;
+  background: #eef8f4;
+}
+
+.geofence-result.outside {
+  border-color: #e2aaa3;
+  background: #fff2ef;
+}
+
+.geofence-result.retry {
+  border-color: #e5c692;
+  background: #fff8ea;
+}
+
+.result-icon,
+.geofence-empty > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--green);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.geofence-result.outside .result-icon {
+  background: var(--red);
+}
+
+.geofence-result.retry .result-icon {
+  background: var(--amber);
+}
+
+.geofence-result > div {
+  min-width: 0;
+}
+
+.geofence-result strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 10px;
+}
+
+.geofence-result p,
+.geofence-empty p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.geofence-result small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted-2);
+  font-size: 7px;
+}
+
+.geofence-empty {
+  border-style: dashed;
+}
+
+.geofence-empty > span {
+  background: var(--line-strong);
+  color: var(--ink);
+}
+
+.face-gate {
+  width: calc(100% - 36px);
+  min-height: 42px;
+  margin: 0 18px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+
+.face-gate:disabled {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--muted-2);
+}
+
+.panel-intro {
+  padding: 14px 18px 2px;
+}
+
+.store-pin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px 14px 14px;
+}
+
+.store-pin-item {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.store-pin-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 11px;
+}
+
+.store-pin-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.store-pin-heading strong {
+  font-size: 10px;
+}
+
+.store-pin-heading div span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.pin-meta {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.pin-meta strong {
+  color: var(--green);
+  font-size: 8px;
+}
+
+.pin-meta button {
+  min-height: 29px;
+  padding: 0 10px;
+  border: 1px solid var(--ink);
+  border-radius: 7px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.geofence-rules-panel {
+  margin-top: 14px;
+  overflow: hidden;
+}
+
+.geofence-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.geofence-steps article {
+  min-height: 126px;
+  padding: 17px;
+  border-right: 1px solid var(--line);
+}
+
+.geofence-steps article:last-child {
+  border-right: 0;
+}
+
+.geofence-steps article > span {
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.7px;
+}
+
+.geofence-steps strong {
+  display: block;
+  margin: 20px 0 6px;
+  font-size: 10px;
+}
+
+.geofence-steps p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
 .toast {
   position: fixed;
   z-index: 100;
@@ -2801,6 +3197,10 @@ button {
   }
 
   .two-column-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .attendance-layout {
     grid-template-columns: 1fr;
   }
 
@@ -2973,7 +3373,7 @@ button {
     bottom: 0;
     left: 0;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     min-height: calc(62px + env(safe-area-inset-bottom));
     padding-bottom: env(safe-area-inset-bottom);
     border-top: 1px solid #32312d;
@@ -3176,6 +3576,43 @@ button {
 
   .transfer-summary .transfer-note {
     grid-column: auto;
+  }
+
+  .attendance-status-strip,
+  .attendance-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .geofence-steps {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .geofence-steps article:nth-child(2) {
+    border-right: 0;
+  }
+
+  .geofence-steps article {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .geofence-steps article:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .store-boundary-card {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .store-boundary-card a {
+    grid-column: 2;
+  }
+
+  .pin-meta {
+    grid-template-columns: 1fr auto;
+  }
+
+  .pin-meta button {
+    grid-column: 1 / -1;
   }
 
   .transfer-card-top {
