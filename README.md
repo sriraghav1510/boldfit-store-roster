@@ -17,6 +17,10 @@ https://github.com/sriraghav1510/boldfit-store-roster/releases/download/v0.1.0/B
 - Flex-pool and inter-store transfer workflows
 - Activity alerts, CSV export, and browser-local demo persistence
 - Store Manager and Area Ops viewing modes
+- WhatsApp-ready weekly rosters, transfer updates, reminders, and coverage alerts
+- Employee roster acknowledgements and issue reporting
+- Published-shift change communication with an audit trail
+- AOM roster approval and return-for-correction workflow
 
 ## Run locally
 

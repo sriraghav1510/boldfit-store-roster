@@ -16,8 +16,12 @@ import {
   STORES,
   addDaysIso,
   autofillRoster,
+  createCoverageRiskNotifications,
   createManagerNudgeNotification,
   createPublicationNotifications,
+  createRosterReviewNotification,
+  createShiftChangeNotification,
+  createTransferCancellationNotification,
   createTransferNotification,
   copyWeekRoster,
   countBlankAssignments,
@@ -45,7 +49,7 @@ type RoleMode = "Store Manager" | "Area Ops";
 type Toast = { message: string; tone: "success" | "warning" | "info" };
 type SelectedCell = { employeeId: string; date: string };
 
-const STORAGE_KEY = "boldfit-roster-demo-v1";
+const STORAGE_KEY = "boldfit-roster-demo-v2";
 
 function loadInitialState(): RosterAppState {
   const initialState = createInitialState();
@@ -237,22 +241,105 @@ export function RosterApp() {
     });
   }
 
-  function setAssignment(value: RosterValue) {
-    if (!selectedCell) return;
-    updateRoster((current) => ({
-      ...current,
-      status: "Draft",
-      publishedAt: undefined,
-      assignments: {
-        ...current.assignments,
-        [selectedCell.employeeId]: {
-          ...current.assignments[selectedCell.employeeId],
-          [selectedCell.date]: value,
+  function setAssignment(
+    value: RosterValue,
+    reason = "Operational coverage adjustment",
+  ) {
+    if (!selectedCell || !selectedEmployee) return;
+    const previous =
+      roster.assignments[selectedCell.employeeId]?.[selectedCell.date] ?? "";
+    if (previous === value) {
+      setSelectedCell(null);
+      return;
+    }
+
+    const wasPublished = roster.status === "Published";
+    const selectedDate = selectedCell.date;
+    const employee = selectedEmployee;
+    const eventId = Date.now();
+
+    setAppState((current) => {
+      const existing =
+        current.schedules[selectedWeek] ??
+        createWeekRoster(selectedWeek, selectedWeek === planningWeekIso());
+      const updatedRoster: WeekRoster = {
+        ...existing,
+        status: wasPublished ? "Published" : "Draft",
+        publishedAt: wasPublished ? existing.publishedAt : undefined,
+        reviewStatus: wasPublished ? "Pending review" : existing.reviewStatus,
+        reviewComment: wasPublished
+          ? `${employee.name}'s ${formatDate(selectedDate)} shift was changed.`
+          : existing.reviewComment,
+        assignments: {
+          ...existing.assignments,
+          [selectedCell.employeeId]: {
+            ...existing.assignments[selectedCell.employeeId],
+            [selectedDate]: value,
+          },
         },
-      },
-    }));
+      };
+
+      if (!wasPublished) {
+        return {
+          ...current,
+          schedules: {
+            ...current.schedules,
+            [selectedWeek]: updatedRoster,
+          },
+        };
+      }
+
+      const shiftChange = createShiftChangeNotification({
+        employee,
+        weekStart: selectedWeek,
+        date: selectedDate,
+        previous,
+        next: value,
+        reason,
+        id: `wa-shift-change-${eventId}`,
+        createdAt: "Just now",
+      });
+      const refreshedCoverage = createCoverageRiskNotifications(
+        updatedRoster,
+        `wa-coverage-${eventId}`,
+        "Just now",
+      ).filter((notification) => notification.relatedDate === selectedDate);
+      const existingNotifications = current.notifications.map((notification) =>
+        notification.kind === "Coverage risk" &&
+        notification.weekStart === selectedWeek &&
+        notification.relatedDate === selectedDate &&
+        notification.status !== "Cancelled"
+          ? { ...notification, status: "Cancelled" as const }
+          : notification,
+      );
+
+      return {
+        ...current,
+        schedules: {
+          ...current.schedules,
+          [selectedWeek]: updatedRoster,
+        },
+        notifications: [
+          shiftChange,
+          ...refreshedCoverage,
+          ...existingNotifications,
+        ],
+        activity: [
+          {
+            id: `activity-${eventId}`,
+            title: "Published shift changed",
+            detail: `${employee.name} · ${formatLongDate(selectedDate)} · ${previous || "Open"} to ${value || "Open"}. Employee confirmation requested.`,
+            kind: refreshedCoverage.length > 0 ? "warning" : "info",
+            time: "Just now",
+          },
+          ...current.activity,
+        ],
+      };
+    });
     notify(
-      value
+      wasPublished
+        ? `${selectedEmployee.name}'s shift changed. Employee and coverage messages are ready.`
+        : value
         ? `${SHIFT_DEFINITIONS[value].label} assigned to ${selectedEmployee?.name}.`
         : `Assignment cleared for ${selectedEmployee?.name}.`,
       "success",
@@ -306,30 +393,45 @@ export function RosterApp() {
       minute: "2-digit",
     }).format(new Date());
     const notificationBatchId = `wa-publish-${Date.now()}`;
+    const publishedRoster: WeekRoster = {
+      ...roster,
+      status: "Published",
+      publishedAt,
+      reviewStatus: "Pending review",
+      reviewComment: undefined,
+    };
     const publicationNotifications = createPublicationNotifications(
-      { ...roster, status: "Published", publishedAt },
+      publishedRoster,
       notificationBatchId,
       "Just now",
     );
+    const coverageNotifications = createCoverageRiskNotifications(
+      publishedRoster,
+      `wa-coverage-publish-${Date.now()}`,
+      "Just now",
+    );
+    const newNotifications = [
+      ...publicationNotifications,
+      ...coverageNotifications,
+    ];
 
     setAppState((current) => ({
       ...current,
       schedules: {
         ...current.schedules,
-        [selectedWeek]: {
-          ...roster,
-          status: "Published",
-          publishedAt,
-        },
+        [selectedWeek]: publishedRoster,
       },
       notifications: [
-        ...publicationNotifications,
+        ...newNotifications,
         ...current.notifications
           .filter(
             (notification) =>
               notification.weekStart !== selectedWeek ||
-              (notification.kind !== "Weekly roster" &&
-                notification.kind !== "Roster published"),
+              !(
+                notification.kind === "Weekly roster" ||
+                notification.kind === "Roster published" ||
+                notification.kind === "Coverage risk"
+              ),
           )
           .map((notification) =>
             notification.weekStart === selectedWeek &&
@@ -342,15 +444,15 @@ export function RosterApp() {
         {
           id: `activity-${Date.now()}`,
           title: "Roster published",
-          detail: `${EMPLOYEES.length * 7} assignments published and ${publicationNotifications.length} WhatsApp messages prepared for ${formatWeekRange(selectedWeek)}.`,
-          kind: "success",
+          detail: `${EMPLOYEES.length * 7} assignments published, ${publicationNotifications.length} team messages prepared, and ${coverageNotifications.length} coverage alerts raised for ${formatWeekRange(selectedWeek)}.`,
+          kind: coverageNotifications.length > 0 ? "warning" : "success",
           time: "Just now",
         },
         ...current.activity,
       ],
     }));
     notify(
-      `Roster published. ${publicationNotifications.length} WhatsApp messages are ready.`,
+      `Roster published. ${newNotifications.length} WhatsApp messages are ready.`,
       "success",
     );
   }
@@ -478,6 +580,14 @@ export function RosterApp() {
   }
 
   function cancelTransfer(transferId: string) {
+    const transfer = appState.transfers.find((item) => item.id === transferId);
+    if (!transfer) return;
+    const cancellationNotification = createTransferCancellationNotification(
+      transfer,
+      `wa-transfer-cancel-${Date.now()}`,
+      "Just now",
+    );
+
     setAppState((current) => ({
       ...current,
       transfers: current.transfers.map((transfer) =>
@@ -485,23 +595,30 @@ export function RosterApp() {
           ? { ...transfer, status: "Cancelled" }
           : transfer,
       ),
-      notifications: current.notifications.map((notification) =>
-        notification.relatedTransferId === transferId
-          ? { ...notification, status: "Cancelled" }
-          : notification,
-      ),
+      notifications: [
+        cancellationNotification,
+        ...current.notifications.map((notification) =>
+          notification.relatedTransferId === transferId &&
+          notification.kind === "Staff transfer"
+            ? { ...notification, status: "Cancelled" as const }
+            : notification,
+        ),
+      ],
       activity: [
         {
           id: `activity-${Date.now()}`,
           title: "Transfer cancelled",
-          detail: "The employee remains assigned to their original store.",
+          detail: `${transfer.employee} remains assigned to ${transfer.sourceStore}. Cancellation message prepared.`,
           kind: "warning",
           time: "Just now",
         },
         ...current.activity,
       ],
     }));
-    notify("Transfer cancelled. Message preview updated.", "info");
+    notify(
+      `Transfer cancelled. WhatsApp update ready for ${transfer.employee}.`,
+      "info",
+    );
   }
 
   async function copyNotification(notificationId: string) {
@@ -602,6 +719,104 @@ export function RosterApp() {
       ],
     }));
     notify("Store Manager WhatsApp nudge is ready.", "success");
+  }
+
+  function respondToNotification(
+    notificationId: string,
+    response: "Confirmed" | "Issue reported",
+  ) {
+    const notification = appState.notifications.find(
+      (item) => item.id === notificationId,
+    );
+    if (!notification?.responseRequired) return;
+
+    setAppState((current) => ({
+      ...current,
+      notifications: current.notifications.map((item) =>
+        item.id === notificationId
+          ? {
+              ...item,
+              status: "Opened",
+              responseStatus: response,
+            }
+          : item,
+      ),
+      activity: [
+        {
+          id: `activity-${Date.now()}`,
+          title:
+            response === "Confirmed"
+              ? "Roster acknowledged"
+              : "Roster issue reported",
+          detail: `${notification.recipientName} ${response === "Confirmed" ? "confirmed the communication" : "reported an issue for Store Manager follow-up"}.`,
+          kind: response === "Confirmed" ? "success" : "warning",
+          time: "Just now",
+        },
+        ...current.activity,
+      ],
+    }));
+    notify(
+      response === "Confirmed"
+        ? `${notification.recipientName} marked as confirmed.`
+        : `${notification.recipientName}'s issue has been flagged.`,
+      response === "Confirmed" ? "success" : "warning",
+    );
+  }
+
+  function reviewRoster(
+    decision: "Approved" | "Changes requested",
+    comment?: string,
+  ) {
+    if (roster.status !== "Published") {
+      notify("Publish the roster before requesting AOM review.", "warning");
+      return;
+    }
+
+    const reviewNotification = createRosterReviewNotification({
+      weekStart: selectedWeek,
+      decision,
+      comment,
+      id: `wa-review-${Date.now()}`,
+      createdAt: "Just now",
+    });
+    setAppState((current) => ({
+      ...current,
+      schedules: {
+        ...current.schedules,
+        [selectedWeek]: {
+          ...roster,
+          reviewStatus: decision,
+          reviewComment:
+            decision === "Approved"
+              ? comment?.trim() || "Coverage and staffing verified."
+              : comment?.trim() ||
+                "Please review the coverage and shift allocation.",
+        },
+      },
+      notifications: [reviewNotification, ...current.notifications],
+      activity: [
+        {
+          id: `activity-${Date.now()}`,
+          title:
+            decision === "Approved"
+              ? "AOM approved roster"
+              : "AOM requested corrections",
+          detail:
+            decision === "Approved"
+              ? `${formatWeekRange(selectedWeek)} approved for Bengaluru Store 01.`
+              : `Roster returned to the Store Manager: ${comment?.trim() || "Coverage and shift allocation require review."}`,
+          kind: decision === "Approved" ? "success" : "warning",
+          time: "Just now",
+        },
+        ...current.activity,
+      ],
+    }));
+    notify(
+      decision === "Approved"
+        ? "Roster approved. Store Manager message ready."
+        : "Roster returned for correction. Store Manager message ready.",
+      decision === "Approved" ? "success" : "warning",
+    );
   }
 
   return (
@@ -733,10 +948,13 @@ export function RosterApp() {
               activity={appState.activity}
               notifications={appState.notifications}
               roster={roster}
+              role={role}
               onReset={resetDemo}
               onCopyNotification={copyNotification}
               onShareNotification={shareNotification}
               onQueueNudge={queueManagerNudge}
+              onRespondNotification={respondToNotification}
+              onReviewRoster={reviewRoster}
             />
           )}
         </main>
@@ -765,6 +983,7 @@ export function RosterApp() {
             roster.assignments[selectedCell.employeeId]?.[selectedCell.date] ??
             ""
           }
+          published={roster.status === "Published"}
           onChoose={setAssignment}
           onClose={() => setSelectedCell(null)}
         />
@@ -931,10 +1150,32 @@ function OverviewView({
           tone="ink"
         />
         <MetricCard
-          label="Planning deadline"
-          value="Thu"
-          detail="publish by 18:00"
-          tone="lime"
+          label={roster.status === "Published" ? "AOM review" : "Planning deadline"}
+          value={
+            roster.status === "Published"
+              ? roster.reviewStatus === "Approved"
+                ? "Approved"
+                : roster.reviewStatus === "Changes requested"
+                  ? "Revise"
+                  : "Pending"
+              : "Thu"
+          }
+          detail={
+            roster.status === "Published"
+              ? roster.reviewStatus === "Approved"
+                ? "verified by Area Operations"
+                : roster.reviewStatus === "Changes requested"
+                  ? "corrections requested"
+                  : "awaiting Area Operations"
+              : "publish by 18:00"
+          }
+          tone={
+            roster.reviewStatus === "Changes requested"
+              ? "red"
+              : roster.status === "Published"
+                ? "green"
+                : "lime"
+          }
         />
       </section>
 
@@ -1219,6 +1460,13 @@ function PlannerView({
               <span className={`status-chip ${roster.status.toLowerCase()}`}>
                 {roster.status}
               </span>
+              {roster.status === "Published" && roster.reviewStatus && (
+                <span
+                  className={`review-state compact ${roster.reviewStatus.toLowerCase().replaceAll(" ", "-")}`}
+                >
+                  {roster.reviewStatus}
+                </span>
+              )}
               <span>
                 {roster.status === "Published" && roster.publishedAt
                   ? `Published ${roster.publishedAt}`
@@ -1482,20 +1730,33 @@ function ActivityView({
   activity,
   notifications,
   roster,
+  role,
   onReset,
   onCopyNotification,
   onShareNotification,
   onQueueNudge,
+  onRespondNotification,
+  onReviewRoster,
 }: {
   activity: RosterAppState["activity"];
   notifications: WhatsAppNotification[];
   roster: WeekRoster;
+  role: RoleMode;
   onReset: () => void;
   onCopyNotification: (id: string) => void;
   onShareNotification: (id: string) => void;
   onQueueNudge: () => void;
+  onRespondNotification: (
+    id: string,
+    response: "Confirmed" | "Issue reported",
+  ) => void;
+  onReviewRoster: (
+    decision: "Approved" | "Changes requested",
+    comment?: string,
+  ) => void;
 }) {
   const published = roster.status === "Published";
+  const [reviewComment, setReviewComment] = useState("");
   const [notificationFilter, setNotificationFilter] = useState<
     "All" | "Employees" | "Managers"
   >("All");
@@ -1518,6 +1779,60 @@ function ActivityView({
   const readyCount = notifications.filter(
     (notification) => notification.status === "Ready",
   ).length;
+  const currentWeekResponses = notifications.filter(
+    (notification) =>
+      notification.responseRequired &&
+      notification.weekStart === roster.weekStart,
+  );
+  const responseMessages =
+    currentWeekResponses.length > 0
+      ? currentWeekResponses
+      : notifications.filter((notification) => notification.responseRequired);
+  const confirmedCount = responseMessages.filter(
+    (notification) => notification.responseStatus === "Confirmed",
+  ).length;
+  const issueCount = responseMessages.filter(
+    (notification) => notification.responseStatus === "Issue reported",
+  ).length;
+  const pendingCount = responseMessages.filter(
+    (notification) =>
+      !notification.responseStatus ||
+      notification.responseStatus === "Pending",
+  ).length;
+  const coverageAlertCount = new Set(
+    notifications
+      .filter(
+        (notification) =>
+          notification.kind === "Coverage risk" &&
+          notification.weekStart === roster.weekStart &&
+          notification.status !== "Cancelled",
+      )
+      .map((notification) => notification.relatedDate),
+  ).size;
+  const reviewStatus =
+    roster.reviewStatus ?? (published ? "Pending review" : "Not submitted");
+
+  function notificationStateClass(notification: WhatsAppNotification) {
+    if (
+      notification.responseStatus &&
+      notification.responseStatus !== "Pending"
+    ) {
+      return notification.responseStatus.toLowerCase().replaceAll(" ", "-");
+    }
+    return notification.status.toLowerCase();
+  }
+
+  function notificationStateLabel(notification: WhatsAppNotification) {
+    if (
+      notification.responseStatus &&
+      notification.responseStatus !== "Pending"
+    ) {
+      return notification.responseStatus;
+    }
+    return notification.status === "Opened"
+      ? "WhatsApp opened"
+      : notification.status;
+  }
 
   return (
     <>
@@ -1550,28 +1865,115 @@ function ActivityView({
           </span>
         </article>
         <article className="alert-card">
-          <span className="alert-day">FRI</span>
+          <span className="alert-day">ACK</span>
           <div>
-            <span className="eyebrow">AREA OPS</span>
-            <h3>Store escalation</h3>
+            <span className="eyebrow">EMPLOYEE RESPONSES</span>
+            <h3>Roster acknowledgement</h3>
             <p>
-              Lists stores that still have incomplete rosters for the coming week.
+              {confirmedCount} confirmed · {pendingCount} pending · {issueCount} issue
+              {issueCount === 1 ? "" : "s"} reported.
             </p>
           </div>
-          <span className="status-chip scheduled">Conditional</span>
+          <span
+            className={`status-chip ${issueCount > 0 ? "scheduled" : "active"}`}
+          >
+            {issueCount > 0 ? "Follow up" : `${confirmedCount} confirmed`}
+          </span>
         </article>
         <article className="alert-card">
-          <span className="alert-day">SAT</span>
+          <span className="alert-day">RISK</span>
           <div>
-            <span className="eyebrow">REGIONAL OPS</span>
-            <h3>Final exception list</h3>
+            <span className="eyebrow">SM + AREA OPS</span>
+            <h3>Coverage alerts</h3>
             <p>
-              Surfaces stores without a published roster before the new week.
+              Alerts are recalculated whenever the roster is published or a
+              live shift changes.
             </p>
           </div>
-          <span className="status-chip scheduled">Conditional</span>
+          <span
+            className={`status-chip ${coverageAlertCount > 0 ? "scheduled" : "active"}`}
+          >
+            {coverageAlertCount > 0
+              ? `${coverageAlertCount} active`
+              : "Covered"}
+          </span>
         </article>
       </div>
+
+      <section className="panel roster-review-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">AOM REVIEW</span>
+            <h2>Publish verification</h2>
+          </div>
+          <span
+            className={`review-state ${reviewStatus.toLowerCase().replaceAll(" ", "-")}`}
+          >
+            {reviewStatus}
+          </span>
+        </div>
+        <div className="roster-review-content">
+          <div className="review-summary">
+            <span className="review-icon" aria-hidden="true">
+              {reviewStatus === "Approved"
+                ? "✓"
+                : reviewStatus === "Changes requested"
+                  ? "!"
+                  : "AO"}
+            </span>
+            <div>
+              <strong>
+                {published
+                  ? `${formatWeekRange(roster.weekStart)} is ready for Area Operations review`
+                  : "Publish this roster to begin Area Operations review"}
+              </strong>
+              <p>
+                {roster.reviewComment ??
+                  "The AOM can approve the roster or return it with a correction note. The Store Manager receives the outcome on WhatsApp."}
+              </p>
+            </div>
+          </div>
+
+          {role === "Area Ops" ? (
+            <div className="review-controls">
+              <label>
+                Review comment
+                <textarea
+                  value={reviewComment}
+                  onChange={(event) => setReviewComment(event.target.value)}
+                  placeholder="Add an approval note or explain the required correction"
+                />
+              </label>
+              <div>
+                <button
+                  className="button secondary"
+                  type="button"
+                  disabled={!published}
+                  onClick={() =>
+                    onReviewRoster("Changes requested", reviewComment)
+                  }
+                >
+                  Return for correction
+                </button>
+                <button
+                  className="button primary"
+                  type="button"
+                  disabled={!published}
+                  onClick={() => onReviewRoster("Approved", reviewComment)}
+                >
+                  Approve roster
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="review-role-note">
+              <span>SM VIEW</span>
+              Switch the demo role to <strong>Area Ops</strong> to approve or
+              return this roster.
+            </div>
+          )}
+        </div>
+      </section>
 
       <section className="panel whatsapp-centre">
         <div className="panel-heading whatsapp-heading">
@@ -1629,11 +2031,9 @@ function ActivityView({
                   <small>{notification.kind} · {notification.createdAt}</small>
                 </span>
                 <span
-                  className={`notification-state ${notification.status.toLowerCase()}`}
+                  className={`notification-state ${notificationStateClass(notification)}`}
                 >
-                  {notification.status === "Opened"
-                    ? "WhatsApp opened"
-                    : notification.status}
+                  {notificationStateLabel(notification)}
                 </span>
               </button>
             ))}
@@ -1658,9 +2058,9 @@ function ActivityView({
                     </p>
                   </div>
                   <span
-                    className={`notification-state ${selectedNotification.status.toLowerCase()}`}
+                    className={`notification-state ${notificationStateClass(selectedNotification)}`}
                   >
-                    {selectedNotification.status}
+                    {notificationStateLabel(selectedNotification)}
                   </span>
                 </div>
                 <div className="whatsapp-chat-preview">
@@ -1689,6 +2089,46 @@ function ActivityView({
                     Open WhatsApp
                   </button>
                 </div>
+                {selectedNotification.responseRequired && (
+                  <div className="response-actions">
+                    <div>
+                      <strong>Employee response</strong>
+                      <span>
+                        {selectedNotification.responseStatus ?? "Pending"}
+                      </span>
+                    </div>
+                    <button
+                      className="button secondary"
+                      type="button"
+                      disabled={
+                        selectedNotification.responseStatus === "Issue reported"
+                      }
+                      onClick={() =>
+                        onRespondNotification(
+                          selectedNotification.id,
+                          "Issue reported",
+                        )
+                      }
+                    >
+                      Report an issue
+                    </button>
+                    <button
+                      className="button acknowledgement-button"
+                      type="button"
+                      disabled={
+                        selectedNotification.responseStatus === "Confirmed"
+                      }
+                      onClick={() =>
+                        onRespondNotification(
+                          selectedNotification.id,
+                          "Confirmed",
+                        )
+                      }
+                    >
+                      Confirm roster
+                    </button>
+                  </div>
+                )}
                 <p className="fine-print notification-disclaimer">
                   Demo phone numbers are masked. WhatsApp opens with the full
                   message ready; select the intended contact to complete sending.
@@ -1743,19 +2183,40 @@ function ActivityView({
             <article>
               <span>02</span>
               <div>
-                <strong>Roster published</strong>
-                <p>One store-published verification alert for the AOM.</p>
+                <strong>Employee response</strong>
+                <p>Confirmation and issue-reporting status for every roster message.</p>
               </div>
             </article>
             <article>
               <span>03</span>
               <div>
-                <strong>Transfer scheduled</strong>
-                <p>Destination, effective date, shift, and reporting time for the employee.</p>
+                <strong>Published shift changed</strong>
+                <p>Only the affected employee receives the old shift, new shift, and reason.</p>
               </div>
             </article>
             <article>
               <span>04</span>
+              <div>
+                <strong>Coverage below minimum</strong>
+                <p>Store Manager and AOM receive the affected date and coverage counts.</p>
+              </div>
+            </article>
+            <article>
+              <span>05</span>
+              <div>
+                <strong>AOM decision recorded</strong>
+                <p>The Store Manager receives an approval or correction message.</p>
+              </div>
+            </article>
+            <article>
+              <span>06</span>
+              <div>
+                <strong>Transfer scheduled or cancelled</strong>
+                <p>The employee receives each movement update with the applicable store and date.</p>
+              </div>
+            </article>
+            <article>
+              <span>07</span>
               <div>
                 <strong>Roster still incomplete</strong>
                 <p>A next-week roster completion nudge for the Store Manager.</p>
@@ -1772,15 +2233,21 @@ function ShiftPicker({
   employee,
   date,
   current,
+  published,
   onChoose,
   onClose,
 }: {
   employee: Employee;
   date: string;
   current: RosterValue;
-  onChoose: (code: RosterValue) => void;
+  published: boolean;
+  onChoose: (code: RosterValue, reason?: string) => void;
   onClose: () => void;
 }) {
+  const [changeReason, setChangeReason] = useState(
+    "Operational coverage adjustment",
+  );
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
@@ -1800,6 +2267,28 @@ function ShiftPicker({
             ×
           </button>
         </div>
+        {published && (
+          <div className="published-change-notice">
+            <strong>Changing a published roster</strong>
+            <p>
+              The employee will receive the old shift, new shift, and reason.
+              Confirmation will be requested automatically.
+            </p>
+            <label>
+              Change reason
+              <select
+                value={changeReason}
+                onChange={(event) => setChangeReason(event.target.value)}
+              >
+                <option>Operational coverage adjustment</option>
+                <option>Employee request</option>
+                <option>Approved leave</option>
+                <option>Store transfer</option>
+                <option>Emergency staffing change</option>
+              </select>
+            </label>
+          </div>
+        )}
         <div className="shift-options">
           {SHIFT_CODES.map((code) => {
             const shift = SHIFT_DEFINITIONS[code];
@@ -1808,7 +2297,7 @@ function ShiftPicker({
                 type="button"
                 className={current === code ? "selected" : ""}
                 key={code}
-                onClick={() => onChoose(code)}
+                onClick={() => onChoose(code, changeReason)}
               >
                 <span className={`legend-code shift-${code.toLowerCase()}`}>
                   {code}
@@ -1822,7 +2311,11 @@ function ShiftPicker({
             );
           })}
         </div>
-        <button className="clear-assignment" type="button" onClick={() => onChoose("")}>
+        <button
+          className="clear-assignment"
+          type="button"
+          onClick={() => onChoose("", changeReason)}
+        >
           Clear assignment
         </button>
       </section>

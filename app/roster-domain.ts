@@ -36,6 +36,8 @@ export type WeekRoster = {
   assignments: Record<string, Record<string, RosterValue>>;
   status: "Draft" | "Published";
   publishedAt?: string;
+  reviewStatus?: "Pending review" | "Approved" | "Changes requested";
+  reviewComment?: string;
 };
 
 export type TransferRequest = {
@@ -63,8 +65,13 @@ export type WhatsAppNotification = {
   kind:
     | "Weekly roster"
     | "Staff transfer"
+    | "Transfer cancelled"
+    | "Shift change"
     | "Roster published"
-    | "Roster nudge";
+    | "Roster nudge"
+    | "Roster approved"
+    | "Roster correction"
+    | "Coverage risk";
   audience: "Employee" | "Area Operations Manager" | "Store Manager";
   recipientName: string;
   recipientId?: string;
@@ -72,9 +79,12 @@ export type WhatsAppNotification = {
   title: string;
   message: string;
   status: "Ready" | "Opened" | "Cancelled";
+  responseRequired?: boolean;
+  responseStatus?: "Pending" | "Confirmed" | "Issue reported";
   createdAt: string;
   weekStart?: string;
   relatedTransferId?: string;
+  relatedDate?: string;
 };
 
 export type RosterAppState = {
@@ -392,7 +402,7 @@ export function employeeWorkDays(
   }).length;
 }
 
-type Coverage = {
+export type Coverage = {
   opening: number;
   core: number;
   closing: number;
@@ -440,6 +450,10 @@ export function coverageForDate(
 }
 
 export function autofillRoster(roster: WeekRoster): WeekRoster {
+  if (countBlankAssignments(roster) === 0) {
+    return roster;
+  }
+
   const assignments = structuredClone(roster.assignments);
   const fallback: ShiftCode[] = ["OP", "MID", "CL"];
   let next = 0;
@@ -544,6 +558,38 @@ export function buildTransferMessage(transfer: TransferRequest): string {
   ].join("\n");
 }
 
+export function buildTransferCancellationMessage(
+  transfer: TransferRequest,
+): string {
+  return [
+    `Hi ${firstName(transfer.employee)},`,
+    `Your transfer to ${storeName(transfer.destinationStore)} on ${formatOrdinalDate(transfer.date)} has been cancelled. Please follow your original roster at ${storeName(transfer.sourceStore)}.`,
+  ].join("\n");
+}
+
+export function buildShiftChangeMessage({
+  employee,
+  date,
+  previous,
+  next,
+  reason,
+  storeCode = "BF-BLR-01",
+}: {
+  employee: Employee;
+  date: string;
+  previous: RosterValue;
+  next: RosterValue;
+  reason: string;
+  storeCode?: string;
+}): string {
+  return [
+    `Hi ${firstName(employee.name)},`,
+    `Your shift for ${formatMessageDayDate(date)} at ${storeName(storeCode)} has been changed from ${formatRosterMessageAssignment(previous)} to ${formatRosterMessageAssignment(next)}.`,
+    `Reason: ${reason}`,
+    "Please confirm that you have seen this update.",
+  ].join("\n");
+}
+
 export function buildAomPublishedMessage(
   storeCode = "BF-BLR-01",
 ): string {
@@ -557,6 +603,55 @@ export function buildStoreManagerNudgeMessage(): string {
   return [
     "Dear SM",
     "Kindly complete the roster for next week",
+  ].join("\n");
+}
+
+export function buildRosterApprovedMessage(
+  weekStart: string,
+  storeCode = "BF-BLR-01",
+): string {
+  return [
+    "Dear SM,",
+    `Your roster for ${storeName(storeCode)} for ${formatWeekRange(weekStart)} has been reviewed and approved by the AOM.`,
+  ].join("\n");
+}
+
+export function buildRosterCorrectionMessage(
+  weekStart: string,
+  comment: string,
+  storeCode = "BF-BLR-01",
+): string {
+  return [
+    "Dear SM,",
+    `Your roster for ${storeName(storeCode)} for ${formatWeekRange(weekStart)} has been returned for correction.`,
+    `AOM comment: ${comment}`,
+    "Please update and republish the roster.",
+  ].join("\n");
+}
+
+export function buildCoverageRiskMessage({
+  roster,
+  date,
+  audience,
+  storeCode = "BF-BLR-01",
+}: {
+  roster: WeekRoster;
+  date: string;
+  audience: "Area Operations Manager" | "Store Manager";
+  storeCode?: string;
+}): string {
+  const coverage = coverageForDate(roster, date);
+  const greeting =
+    audience === "Area Operations Manager" ? "Dear AOM," : "Dear SM,";
+  const action =
+    audience === "Area Operations Manager"
+      ? "Please review this with the Store Manager."
+      : "Please update the roster to restore minimum coverage.";
+  return [
+    greeting,
+    `${storeName(storeCode)} has insufficient coverage on ${formatMessageDayDate(date)}.`,
+    `Opening: ${coverage.opening}/2 · Core: ${coverage.core}/4 · Closing: ${coverage.closing}/2`,
+    action,
   ].join("\n");
 }
 
@@ -576,6 +671,8 @@ export function createPublicationNotifications(
     title: `${employee.name} · Weekly roster`,
     message: buildEmployeeRosterMessage(roster, employee, storeCode),
     status: "Ready" as const,
+    responseRequired: true,
+    responseStatus: "Pending" as const,
     createdAt,
     weekStart: roster.weekStart,
   }));
@@ -594,6 +691,49 @@ export function createPublicationNotifications(
       weekStart: roster.weekStart,
     },
   ];
+}
+
+export function createShiftChangeNotification({
+  employee,
+  weekStart,
+  date,
+  previous,
+  next,
+  reason,
+  id,
+  createdAt,
+}: {
+  employee: Employee;
+  weekStart: string;
+  date: string;
+  previous: RosterValue;
+  next: RosterValue;
+  reason: string;
+  id: string;
+  createdAt: string;
+}): WhatsAppNotification {
+  return {
+    id,
+    kind: "Shift change",
+    audience: "Employee",
+    recipientName: employee.name,
+    recipientId: employee.id,
+    phone: employee.phone,
+    title: `${employee.name} · Shift changed`,
+    message: buildShiftChangeMessage({
+      employee,
+      date,
+      previous,
+      next,
+      reason,
+    }),
+    status: "Ready",
+    responseRequired: true,
+    responseStatus: "Pending",
+    createdAt,
+    weekStart,
+    relatedDate: date,
+  };
 }
 
 export function createTransferNotification(
@@ -619,6 +759,30 @@ export function createTransferNotification(
   };
 }
 
+export function createTransferCancellationNotification(
+  transfer: TransferRequest,
+  id: string,
+  createdAt: string,
+): WhatsAppNotification {
+  const employee =
+    EMPLOYEES.find((person) => person.id === transfer.employeeId) ??
+    FLEX_POOL.find((person) => person.id === transfer.employeeId);
+  return {
+    id,
+    kind: "Transfer cancelled",
+    audience: "Employee",
+    recipientName: transfer.employee,
+    recipientId: transfer.employeeId,
+    phone: employee?.phone,
+    title: `${transfer.employee} · Transfer cancelled`,
+    message: buildTransferCancellationMessage(transfer),
+    status: "Ready",
+    createdAt,
+    relatedTransferId: transfer.id,
+    relatedDate: transfer.date,
+  };
+}
+
 export function createManagerNudgeNotification(
   weekStart: string,
   id: string,
@@ -640,6 +804,96 @@ export function createManagerNudgeNotification(
   };
 }
 
+export function createRosterReviewNotification({
+  weekStart,
+  decision,
+  comment,
+  id,
+  createdAt,
+}: {
+  weekStart: string;
+  decision: "Approved" | "Changes requested";
+  comment?: string;
+  id: string;
+  createdAt: string;
+}): WhatsAppNotification {
+  const manager = EMPLOYEES.find((employee) => employee.role === "Store Manager");
+  const approved = decision === "Approved";
+  return {
+    id,
+    kind: approved ? "Roster approved" : "Roster correction",
+    audience: "Store Manager",
+    recipientName: manager?.name ?? "Store Manager",
+    recipientId: manager?.id,
+    phone: manager?.phone,
+    title: approved
+      ? "Store Manager · Roster approved"
+      : "Store Manager · Corrections required",
+    message: approved
+      ? buildRosterApprovedMessage(weekStart)
+      : buildRosterCorrectionMessage(
+          weekStart,
+          comment?.trim() || "Please review the coverage and shift allocation.",
+        ),
+    status: "Ready",
+    createdAt,
+    weekStart,
+  };
+}
+
+export function createCoverageRiskNotifications(
+  roster: WeekRoster,
+  idPrefix: string,
+  createdAt: string,
+  storeCode = "BF-BLR-01",
+): WhatsAppNotification[] {
+  return weekDates(roster.weekStart).flatMap((date) => {
+    if (coverageForDate(roster, date).status === "Good") return [];
+
+    const manager = EMPLOYEES.find(
+      (employee) => employee.role === "Store Manager",
+    );
+    return [
+      {
+        id: `${idPrefix}-${date}-sm`,
+        kind: "Coverage risk" as const,
+        audience: "Store Manager" as const,
+        recipientName: manager?.name ?? "Store Manager",
+        recipientId: manager?.id,
+        phone: manager?.phone,
+        title: `${formatMessageDayDate(date)} · Coverage risk`,
+        message: buildCoverageRiskMessage({
+          roster,
+          date,
+          audience: "Store Manager",
+          storeCode,
+        }),
+        status: "Ready" as const,
+        createdAt,
+        weekStart: roster.weekStart,
+        relatedDate: date,
+      },
+      {
+        id: `${idPrefix}-${date}-aom`,
+        kind: "Coverage risk" as const,
+        audience: "Area Operations Manager" as const,
+        recipientName: "Area Operations Manager",
+        title: `${formatMessageDayDate(date)} · Coverage risk`,
+        message: buildCoverageRiskMessage({
+          roster,
+          date,
+          audience: "Area Operations Manager",
+          storeCode,
+        }),
+        status: "Ready" as const,
+        createdAt,
+        weekStart: roster.weekStart,
+        relatedDate: date,
+      },
+    ];
+  });
+}
+
 export function createInitialState(): RosterAppState {
   const current = startOfWeekIso();
   const planning = planningWeekIso();
@@ -648,6 +902,8 @@ export function createInitialState(): RosterAppState {
   const currentRoster: WeekRoster = {
     ...createWeekRoster(current, false),
     status: "Published",
+    reviewStatus: "Approved",
+    reviewComment: "Coverage verified.",
   };
   const transfers: TransferRequest[] = [
     {
@@ -677,9 +933,17 @@ export function createInitialState(): RosterAppState {
     currentRoster,
     "wa-current",
     "Today · 09:12",
-  ).map((notification) => ({
+  ).map((notification, index) => ({
     ...notification,
     status: "Opened" as const,
+    responseStatus:
+      notification.audience === "Employee"
+        ? index < 2
+          ? ("Confirmed" as const)
+          : index === 2
+            ? ("Issue reported" as const)
+            : ("Pending" as const)
+        : undefined,
   }));
   const transferNotifications = transfers.map((transfer, index) =>
     createTransferNotification(
@@ -687,6 +951,11 @@ export function createInitialState(): RosterAppState {
       `wa-transfer-${index + 1}`,
       index === 0 ? "Yesterday · 18:40" : "Today · 10:05",
     ),
+  );
+  const coverageNotifications = createCoverageRiskNotifications(
+    createWeekRoster(planning, true),
+    "wa-coverage-planning",
+    "Today · 10:10",
   );
 
   return {
@@ -718,6 +987,13 @@ export function createInitialState(): RosterAppState {
         kind: "warning",
         time: "Mon · 10:00",
       },
+      {
+        id: "activity-4",
+        title: "Roster responses received",
+        detail: "2 employees confirmed and 1 employee reported an issue.",
+        kind: "info",
+        time: "Today · 09:35",
+      },
     ],
     notifications: [
       createManagerNudgeNotification(
@@ -726,6 +1002,7 @@ export function createInitialState(): RosterAppState {
         "Mon · 10:00",
       ),
       ...transferNotifications,
+      ...coverageNotifications,
       ...publishedNotifications,
     ],
   };
