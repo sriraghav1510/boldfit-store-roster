@@ -16,6 +16,9 @@ import {
   STORES,
   addDaysIso,
   autofillRoster,
+  createManagerNudgeNotification,
+  createPublicationNotifications,
+  createTransferNotification,
   copyWeekRoster,
   countBlankAssignments,
   coverageForDate,
@@ -34,6 +37,7 @@ import {
   type ShiftCode,
   type TransferRequest,
   type WeekRoster,
+  type WhatsAppNotification,
 } from "./roster-domain";
 
 type View = "overview" | "planner" | "people" | "transfers" | "activity";
@@ -58,7 +62,12 @@ function loadInitialState(): RosterAppState {
 
     const parsed = JSON.parse(saved) as RosterAppState;
     if (parsed.schedules && parsed.transfers && parsed.activity) {
-      return parsed;
+      return {
+        ...parsed,
+        notifications: Array.isArray(parsed.notifications)
+          ? parsed.notifications
+          : initialState.notifications,
+      };
     }
   } catch {
     // A damaged demo cache should never stop the roster from opening.
@@ -296,6 +305,12 @@ export function RosterApp() {
       hour: "2-digit",
       minute: "2-digit",
     }).format(new Date());
+    const notificationBatchId = `wa-publish-${Date.now()}`;
+    const publicationNotifications = createPublicationNotifications(
+      { ...roster, status: "Published", publishedAt },
+      notificationBatchId,
+      "Just now",
+    );
 
     setAppState((current) => ({
       ...current,
@@ -307,18 +322,37 @@ export function RosterApp() {
           publishedAt,
         },
       },
+      notifications: [
+        ...publicationNotifications,
+        ...current.notifications
+          .filter(
+            (notification) =>
+              notification.weekStart !== selectedWeek ||
+              (notification.kind !== "Weekly roster" &&
+                notification.kind !== "Roster published"),
+          )
+          .map((notification) =>
+            notification.weekStart === selectedWeek &&
+            notification.kind === "Roster nudge"
+              ? { ...notification, status: "Cancelled" as const }
+              : notification,
+          ),
+      ],
       activity: [
         {
           id: `activity-${Date.now()}`,
           title: "Roster published",
-          detail: `${EMPLOYEES.length * 7} assignments published for ${formatWeekRange(selectedWeek)}.`,
+          detail: `${EMPLOYEES.length * 7} assignments published and ${publicationNotifications.length} WhatsApp messages prepared for ${formatWeekRange(selectedWeek)}.`,
           kind: "success",
           time: "Just now",
         },
         ...current.activity,
       ],
     }));
-    notify("Roster published. Team notification preview is ready.", "success");
+    notify(
+      `Roster published. ${publicationNotifications.length} WhatsApp messages are ready.`,
+      "success",
+    );
   }
 
   async function exportRoster() {
@@ -410,10 +444,16 @@ export function RosterApp() {
       shift: transferShift,
       status: "Scheduled",
     };
+    const transferNotification = createTransferNotification(
+      transfer,
+      `wa-transfer-${Date.now()}`,
+      "Just now",
+    );
 
     setAppState((current) => ({
       ...current,
       transfers: [transfer, ...current.transfers],
+      notifications: [transferNotification, ...current.notifications],
       activity: [
         {
           id: `activity-${Date.now()}`,
@@ -431,8 +471,8 @@ export function RosterApp() {
     setShowTransferForm(false);
     notify(
       direction === "Incoming"
-        ? `${employee.name} added from the Flex Pool.`
-        : `${employee.name} scheduled for a temporary transfer.`,
+        ? `${employee.name} added from the Flex Pool. WhatsApp message ready.`
+        : `${employee.name} scheduled for a temporary transfer. WhatsApp message ready.`,
       "success",
     );
   }
@@ -444,6 +484,11 @@ export function RosterApp() {
         transfer.id === transferId
           ? { ...transfer, status: "Cancelled" }
           : transfer,
+      ),
+      notifications: current.notifications.map((notification) =>
+        notification.relatedTransferId === transferId
+          ? { ...notification, status: "Cancelled" }
+          : notification,
       ),
       activity: [
         {
@@ -457,6 +502,106 @@ export function RosterApp() {
       ],
     }));
     notify("Transfer cancelled. Message preview updated.", "info");
+  }
+
+  async function copyNotification(notificationId: string) {
+    const notification = appState.notifications.find(
+      (item) => item.id === notificationId,
+    );
+    if (!notification) return;
+
+    try {
+      await navigator.clipboard.writeText(notification.message);
+      notify(`Message for ${notification.recipientName} copied.`, "success");
+    } catch {
+      notify("Copy was unavailable on this device.", "warning");
+    }
+  }
+
+  async function shareNotification(notificationId: string) {
+    const notification = appState.notifications.find(
+      (item) => item.id === notificationId,
+    );
+    if (!notification || notification.status === "Cancelled") return;
+
+    try {
+      if (Capacitor.isNativePlatform()) {
+        const { Share } = await import("@capacitor/share");
+        await Share.share({
+          title: notification.title,
+          text: notification.message,
+          dialogTitle: "Share via WhatsApp",
+        });
+      } else {
+        const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(notification.message)}`;
+        const anchor = document.createElement("a");
+        anchor.href = whatsappUrl;
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+        anchor.click();
+      }
+
+      setAppState((current) => ({
+        ...current,
+        notifications: current.notifications.map((item) =>
+          item.id === notificationId
+            ? { ...item, status: "Opened" }
+            : item,
+        ),
+        activity: [
+          {
+            id: `activity-${Date.now()}`,
+            title: "WhatsApp opened",
+            detail: `${notification.kind} message prepared for ${notification.recipientName}.`,
+            kind: "success",
+            time: "Just now",
+          },
+          ...current.activity,
+        ],
+      }));
+      notify(`WhatsApp opened for ${notification.recipientName}.`, "success");
+    } catch {
+      notify("WhatsApp sharing was closed or unavailable.", "warning");
+    }
+  }
+
+  function queueManagerNudge() {
+    if (roster.status === "Published") {
+      notify("This roster is already published. No manager nudge is needed.", "info");
+      return;
+    }
+
+    const alreadyReady = appState.notifications.some(
+      (notification) =>
+        notification.kind === "Roster nudge" &&
+        notification.weekStart === selectedWeek &&
+        notification.status === "Ready",
+    );
+    if (alreadyReady) {
+      notify("The Store Manager nudge is already ready.", "info");
+      return;
+    }
+
+    const nudge = createManagerNudgeNotification(
+      selectedWeek,
+      `wa-nudge-${Date.now()}`,
+      "Just now",
+    );
+    setAppState((current) => ({
+      ...current,
+      notifications: [nudge, ...current.notifications],
+      activity: [
+        {
+          id: `activity-${Date.now()}`,
+          title: "Planning nudge queued",
+          detail: `WhatsApp reminder prepared for the Store Manager for ${formatWeekRange(selectedWeek)}.`,
+          kind: "warning",
+          time: "Just now",
+        },
+        ...current.activity,
+      ],
+    }));
+    notify("Store Manager WhatsApp nudge is ready.", "success");
   }
 
   return (
@@ -586,8 +731,12 @@ export function RosterApp() {
           {view === "activity" && (
             <ActivityView
               activity={appState.activity}
+              notifications={appState.notifications}
               roster={roster}
               onReset={resetDemo}
+              onCopyNotification={copyNotification}
+              onShareNotification={shareNotification}
+              onQueueNudge={queueManagerNudge}
             />
           )}
         </main>
@@ -1254,8 +1403,9 @@ function TransfersView({
         <div className="transfer-note">
           <span aria-hidden="true">i</span>
           <p>
-            Scheduling a transfer creates a message preview for the employee,
-            source manager, and destination manager.
+            Scheduling a transfer immediately prepares the employee’s
+            WhatsApp message with the destination store, reporting time, and
+            shift.
           </p>
         </div>
       </section>
@@ -1330,14 +1480,45 @@ function TransfersView({
 
 function ActivityView({
   activity,
+  notifications,
   roster,
   onReset,
+  onCopyNotification,
+  onShareNotification,
+  onQueueNudge,
 }: {
   activity: RosterAppState["activity"];
+  notifications: WhatsAppNotification[];
   roster: WeekRoster;
   onReset: () => void;
+  onCopyNotification: (id: string) => void;
+  onShareNotification: (id: string) => void;
+  onQueueNudge: () => void;
 }) {
   const published = roster.status === "Published";
+  const [notificationFilter, setNotificationFilter] = useState<
+    "All" | "Employees" | "Managers"
+  >("All");
+  const [selectedNotificationId, setSelectedNotificationId] = useState(
+    notifications[0]?.id ?? "",
+  );
+  const visibleNotifications = notifications.filter((notification) => {
+    if (notificationFilter === "Employees") {
+      return notification.audience === "Employee";
+    }
+    if (notificationFilter === "Managers") {
+      return notification.audience !== "Employee";
+    }
+    return true;
+  });
+  const selectedNotification =
+    visibleNotifications.find(
+      (notification) => notification.id === selectedNotificationId,
+    ) ?? visibleNotifications[0];
+  const readyCount = notifications.filter(
+    (notification) => notification.status === "Ready",
+  ).length;
+
   return (
     <>
       <PageHeading
@@ -1358,8 +1539,11 @@ function ActivityView({
             <span className="eyebrow">STORE MANAGER</span>
             <h3>Planning reminder</h3>
             <p>
-              Sent at 18:00 if next week’s roster has not been published.
+              Prepared at 18:00 if next week’s roster has not been published.
             </p>
+            <button type="button" onClick={onQueueNudge}>
+              {published ? "Check reminder" : "Preview nudge"}
+            </button>
           </div>
           <span className={`status-chip ${published ? "active" : "scheduled"}`}>
             {published ? "Not needed" : "Scheduled"}
@@ -1389,6 +1573,136 @@ function ActivityView({
         </article>
       </div>
 
+      <section className="panel whatsapp-centre">
+        <div className="panel-heading whatsapp-heading">
+          <div>
+            <span className="eyebrow">WHATSAPP NOTIFICATIONS</span>
+            <h2>Message centre</h2>
+            <p>
+              Review each personalised message before opening it in WhatsApp.
+            </p>
+          </div>
+          <div className="message-centre-count">
+            <strong>{readyCount}</strong>
+            <span>ready to open</span>
+          </div>
+        </div>
+
+        <div className="notification-filters" aria-label="Filter notifications">
+          {(["All", "Employees", "Managers"] as const).map((filter) => (
+            <button
+              type="button"
+              key={filter}
+              className={notificationFilter === filter ? "active" : ""}
+              onClick={() => setNotificationFilter(filter)}
+            >
+              {filter}
+              <span>
+                {filter === "All"
+                  ? notifications.length
+                  : notifications.filter((notification) =>
+                      filter === "Employees"
+                        ? notification.audience === "Employee"
+                        : notification.audience !== "Employee",
+                    ).length}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <div className="notification-workspace">
+          <div className="notification-list" aria-label="WhatsApp message queue">
+            {visibleNotifications.map((notification) => (
+              <button
+                type="button"
+                className={
+                  selectedNotification?.id === notification.id ? "active" : ""
+                }
+                key={notification.id}
+                onClick={() => setSelectedNotificationId(notification.id)}
+              >
+                <span className="notification-avatar" aria-hidden="true">
+                  {notification.audience === "Employee" ? "EMP" : "OPS"}
+                </span>
+                <span className="notification-summary">
+                  <strong>{notification.recipientName}</strong>
+                  <small>{notification.kind} · {notification.createdAt}</small>
+                </span>
+                <span
+                  className={`notification-state ${notification.status.toLowerCase()}`}
+                >
+                  {notification.status === "Opened"
+                    ? "WhatsApp opened"
+                    : notification.status}
+                </span>
+              </button>
+            ))}
+            {visibleNotifications.length === 0 && (
+              <div className="notification-empty">
+                No messages in this group yet.
+              </div>
+            )}
+          </div>
+
+          <div className="notification-preview">
+            {selectedNotification ? (
+              <>
+                <div className="notification-preview-meta">
+                  <div>
+                    <span className="eyebrow">{selectedNotification.audience}</span>
+                    <h3>{selectedNotification.title}</h3>
+                    <p>
+                      {selectedNotification.phone
+                        ? `${selectedNotification.phone} · ${selectedNotification.kind}`
+                        : selectedNotification.kind}
+                    </p>
+                  </div>
+                  <span
+                    className={`notification-state ${selectedNotification.status.toLowerCase()}`}
+                  >
+                    {selectedNotification.status}
+                  </span>
+                </div>
+                <div className="whatsapp-chat-preview">
+                  <span className="whatsapp-label">WHATSAPP PREVIEW</span>
+                  <p>{selectedNotification.message}</p>
+                  <small>Prepared by Boldfit Store Operations</small>
+                </div>
+                <div className="notification-actions">
+                  <button
+                    className="button secondary"
+                    type="button"
+                    onClick={() =>
+                      onCopyNotification(selectedNotification.id)
+                    }
+                  >
+                    Copy message
+                  </button>
+                  <button
+                    className="button whatsapp-button"
+                    type="button"
+                    disabled={selectedNotification.status === "Cancelled"}
+                    onClick={() =>
+                      onShareNotification(selectedNotification.id)
+                    }
+                  >
+                    Open WhatsApp
+                  </button>
+                </div>
+                <p className="fine-print notification-disclaimer">
+                  Demo phone numbers are masked. WhatsApp opens with the full
+                  message ready; select the intended contact to complete sending.
+                </p>
+              </>
+            ) : (
+              <div className="notification-empty">
+                Select a message to preview it.
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
       <div className="activity-layout">
         <section className="panel">
           <div className="panel-heading">
@@ -1411,29 +1725,43 @@ function ActivityView({
           </div>
         </section>
 
-        <section className="panel message-preview">
+        <section className="panel automation-rules">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">MESSAGE PREVIEW</span>
-              <h2>Team notification</h2>
+              <span className="eyebrow">AUTOMATION RULES</span>
+              <h2>When messages are prepared</h2>
             </div>
-            <span className="whatsapp-ready">WhatsApp-ready</span>
           </div>
-          <div className="message-bubble">
-            <p>Hi team,</p>
-            <p>
-              Your Boldfit roster for <strong>{formatWeekRange(roster.weekStart)}</strong> is
-              ready.
-            </p>
-            <p>
-              Please review your assigned shift and report any discrepancy to
-              your store manager before the week begins.
-            </p>
-            <span>— Boldfit Store Operations</span>
+          <div className="automation-rule-list">
+            <article>
+              <span>01</span>
+              <div>
+                <strong>Roster published</strong>
+                <p>One personalised seven-day roster for every employee.</p>
+              </div>
+            </article>
+            <article>
+              <span>02</span>
+              <div>
+                <strong>Roster published</strong>
+                <p>One store-published verification alert for the AOM.</p>
+              </div>
+            </article>
+            <article>
+              <span>03</span>
+              <div>
+                <strong>Transfer scheduled</strong>
+                <p>Destination, effective date, shift, and reporting time for the employee.</p>
+              </div>
+            </article>
+            <article>
+              <span>04</span>
+              <div>
+                <strong>Roster still incomplete</strong>
+                <p>A next-week roster completion nudge for the Store Manager.</p>
+              </div>
+            </article>
           </div>
-          <p className="fine-print">
-            Demo preview only. No message is sent from this version.
-          </p>
         </section>
       </div>
     </>
@@ -1619,8 +1947,7 @@ function TransferForm({
           </div>
           <div className="form-note">
             <span aria-hidden="true">i</span>
-            A notification preview will be created for all affected managers and
-            the employee.
+            A personalised WhatsApp message will be prepared for the employee.
           </div>
           <button className="button primary wide" type="submit">
             Schedule assignment

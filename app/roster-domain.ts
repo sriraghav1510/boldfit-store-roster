@@ -58,10 +58,30 @@ export type ActivityEvent = {
   time: string;
 };
 
+export type WhatsAppNotification = {
+  id: string;
+  kind:
+    | "Weekly roster"
+    | "Staff transfer"
+    | "Roster published"
+    | "Roster nudge";
+  audience: "Employee" | "Area Operations Manager" | "Store Manager";
+  recipientName: string;
+  recipientId?: string;
+  phone?: string;
+  title: string;
+  message: string;
+  status: "Ready" | "Opened" | "Cancelled";
+  createdAt: string;
+  weekStart?: string;
+  relatedTransferId?: string;
+};
+
 export type RosterAppState = {
   schedules: Record<string, WeekRoster>;
   transfers: TransferRequest[];
   activity: ActivityEvent[];
+  notifications: WhatsAppNotification[];
 };
 
 export const SHIFT_DEFINITIONS: Record<ShiftCode, ShiftDefinition> = {
@@ -436,42 +456,246 @@ export function autofillRoster(roster: WeekRoster): WeekRoster {
   return { ...roster, assignments, status: "Draft", publishedAt: undefined };
 }
 
+export function storeName(storeCode: string): string {
+  return (
+    STORES.find((store) => store.code === storeCode)?.name ?? storeCode
+  );
+}
+
+function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? name;
+}
+
+function formatMessageDayDate(value: string): string {
+  const date = fromIsoDate(value);
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+  }).format(date);
+  const monthDay = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(date);
+  return `${weekday} ${monthDay}`;
+}
+
+function formatOrdinalDate(value: string): string {
+  const date = fromIsoDate(value);
+  const day = date.getDate();
+  const lastTwoDigits = day % 100;
+  const suffix =
+    lastTwoDigits >= 11 && lastTwoDigits <= 13
+      ? "th"
+      : day % 10 === 1
+        ? "st"
+        : day % 10 === 2
+          ? "nd"
+          : day % 10 === 3
+            ? "rd"
+            : "th";
+  const month = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+  }).format(date);
+  return `${month} ${day}${suffix}`;
+}
+
+function formatWhatsAppTime(value: string): string {
+  const [hourText, minuteText] = value.split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const hour12 = hour % 12 || 12;
+  const minutePart = minute === 0 ? "" : `.${String(minute).padStart(2, "0")}`;
+  return `${hour12}${minutePart}${hour >= 12 ? "pm" : "am"}`;
+}
+
+function formatRosterMessageAssignment(value: RosterValue): string {
+  if (!value) return "Open";
+  if (value === "WO") return "Week Off (Have Fun!)";
+  if (value === "LE") return "Leave";
+  if (value === "NA") return "Not Available";
+  if (value === "TR") return "Transferred";
+
+  const [start, end] = SHIFT_DEFINITIONS[value].time.split("–");
+  return `${value} (${formatWhatsAppTime(start)} to ${formatWhatsAppTime(end)})`;
+}
+
+export function buildEmployeeRosterMessage(
+  roster: WeekRoster,
+  employee: Employee,
+  storeCode = "BF-BLR-01",
+): string {
+  const lines = weekDates(roster.weekStart).map((date) => {
+    const assignment = roster.assignments[employee.id]?.[date] ?? "";
+    return `${formatMessageDayDate(date)} - ${formatRosterMessageAssignment(assignment)}`;
+  });
+
+  return [
+    `Hi ${firstName(employee.name)},`,
+    `Your roster for this week at ${storeName(storeCode)} is as follows:`,
+    ...lines,
+  ].join("\n");
+}
+
+export function buildTransferMessage(transfer: TransferRequest): string {
+  const shift = SHIFT_DEFINITIONS[transfer.shift];
+  const [start] = shift.time.split("–");
+  return [
+    `Hi ${firstName(transfer.employee)},`,
+    `Please note, you have been transferred to ${storeName(transfer.destinationStore)} as on ${formatOrdinalDate(transfer.date)}. Reach the store at ${formatWhatsAppTime(start)} for your ${transfer.shift} shift.`,
+  ].join("\n");
+}
+
+export function buildAomPublishedMessage(
+  storeCode = "BF-BLR-01",
+): string {
+  return [
+    "Dear AOM,",
+    `${storeName(storeCode)} has published its roster. Please check and verify to ensure fill coverage for the week`,
+  ].join("\n");
+}
+
+export function buildStoreManagerNudgeMessage(): string {
+  return [
+    "Dear SM",
+    "Kindly complete the roster for next week",
+  ].join("\n");
+}
+
+export function createPublicationNotifications(
+  roster: WeekRoster,
+  idPrefix: string,
+  createdAt: string,
+  storeCode = "BF-BLR-01",
+): WhatsAppNotification[] {
+  const employeeNotifications = EMPLOYEES.map((employee) => ({
+    id: `${idPrefix}-${employee.id}`,
+    kind: "Weekly roster" as const,
+    audience: "Employee" as const,
+    recipientName: employee.name,
+    recipientId: employee.id,
+    phone: employee.phone,
+    title: `${employee.name} · Weekly roster`,
+    message: buildEmployeeRosterMessage(roster, employee, storeCode),
+    status: "Ready" as const,
+    createdAt,
+    weekStart: roster.weekStart,
+  }));
+
+  return [
+    ...employeeNotifications,
+    {
+      id: `${idPrefix}-aom`,
+      kind: "Roster published",
+      audience: "Area Operations Manager",
+      recipientName: "Area Operations Manager",
+      title: `${storeName(storeCode)} · Published`,
+      message: buildAomPublishedMessage(storeCode),
+      status: "Ready",
+      createdAt,
+      weekStart: roster.weekStart,
+    },
+  ];
+}
+
+export function createTransferNotification(
+  transfer: TransferRequest,
+  id: string,
+  createdAt: string,
+): WhatsAppNotification {
+  const employee =
+    EMPLOYEES.find((person) => person.id === transfer.employeeId) ??
+    FLEX_POOL.find((person) => person.id === transfer.employeeId);
+  return {
+    id,
+    kind: "Staff transfer",
+    audience: "Employee",
+    recipientName: transfer.employee,
+    recipientId: transfer.employeeId,
+    phone: employee?.phone,
+    title: `${transfer.employee} · Store transfer`,
+    message: buildTransferMessage(transfer),
+    status: "Ready",
+    createdAt,
+    relatedTransferId: transfer.id,
+  };
+}
+
+export function createManagerNudgeNotification(
+  weekStart: string,
+  id: string,
+  createdAt: string,
+): WhatsAppNotification {
+  const manager = EMPLOYEES.find((employee) => employee.role === "Store Manager");
+  return {
+    id,
+    kind: "Roster nudge",
+    audience: "Store Manager",
+    recipientName: manager?.name ?? "Store Manager",
+    recipientId: manager?.id,
+    phone: manager?.phone,
+    title: "Store Manager · Roster reminder",
+    message: buildStoreManagerNudgeMessage(),
+    status: "Ready",
+    createdAt,
+    weekStart,
+  };
+}
+
 export function createInitialState(): RosterAppState {
   const current = startOfWeekIso();
   const planning = planningWeekIso();
   const previous = addDaysIso(current, -7);
   const planningDates = weekDates(planning);
+  const currentRoster: WeekRoster = {
+    ...createWeekRoster(current, false),
+    status: "Published",
+  };
+  const transfers: TransferRequest[] = [
+    {
+      id: "tr-demo-1",
+      employee: "Saira P.",
+      employeeId: "bf-p201",
+      direction: "Incoming",
+      sourceStore: "Bengaluru Flex Pool",
+      destinationStore: "BF-BLR-01",
+      date: planningDates[5],
+      shift: "CL",
+      status: "Scheduled",
+    },
+    {
+      id: "tr-demo-2",
+      employee: "Asha Nair",
+      employeeId: "bf-101",
+      direction: "Outgoing",
+      sourceStore: "BF-BLR-01",
+      destinationStore: "BF-BLR-02",
+      date: planningDates[2],
+      shift: "CL",
+      status: "Scheduled",
+    },
+  ];
+  const publishedNotifications = createPublicationNotifications(
+    currentRoster,
+    "wa-current",
+    "Today · 09:12",
+  ).map((notification) => ({
+    ...notification,
+    status: "Opened" as const,
+  }));
+  const transferNotifications = transfers.map((transfer, index) =>
+    createTransferNotification(
+      transfer,
+      `wa-transfer-${index + 1}`,
+      index === 0 ? "Yesterday · 18:40" : "Today · 10:05",
+    ),
+  );
 
   return {
     schedules: {
       [previous]: { ...createWeekRoster(previous, false), status: "Published" },
-      [current]: { ...createWeekRoster(current, false), status: "Published" },
+      [current]: currentRoster,
       [planning]: createWeekRoster(planning, true),
     },
-    transfers: [
-      {
-        id: "tr-demo-1",
-        employee: "Saira P.",
-        employeeId: "bf-p201",
-        direction: "Incoming",
-        sourceStore: "Bengaluru Flex Pool",
-        destinationStore: "BF-BLR-01",
-        date: planningDates[5],
-        shift: "CL",
-        status: "Scheduled",
-      },
-      {
-        id: "tr-demo-2",
-        employee: "Rohan Mehta",
-        employeeId: "bf-102",
-        direction: "Outgoing",
-        sourceStore: "BF-BLR-01",
-        destinationStore: "BF-BLR-03",
-        date: planningDates[2],
-        shift: "FULL",
-        status: "Scheduled",
-      },
-    ],
+    transfers,
     activity: [
       {
         id: "activity-1",
@@ -494,6 +718,15 @@ export function createInitialState(): RosterAppState {
         kind: "warning",
         time: "Mon · 10:00",
       },
+    ],
+    notifications: [
+      createManagerNudgeNotification(
+        planning,
+        "wa-nudge-planning",
+        "Mon · 10:00",
+      ),
+      ...transferNotifications,
+      ...publishedNotifications,
     ],
   };
 }
